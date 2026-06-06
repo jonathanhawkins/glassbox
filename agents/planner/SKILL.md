@@ -128,19 +128,49 @@ category tag and never invent a new one outside the allowed set.
   the other six scoring categories and the improver has room to climb.
 
 ## Revision v2:
-- The v1 evaluation scored accuracy 0.14 and identified failures on the `punctuation` category. To address this, a bead for `punctuation` has been added to the coverage block, enabling the planner to generate a corresponding task.
+The v1 evaluation showed that inputs containing punctuation were failing, resulting in an overall accuracy of 0.14. To address this, a new bead for the `punctuation` category has been added, expanding coverage to include both `ascii` and `punctuation`. This addition should improve tokenization correctness for punctuation-heavy lines.
+
+----
+The latest eval (planner v2) scored accuracy 0.29. The input category 'numbers' is failing because the plan does not cover it. Rewrite the document so that:
+1. the coverage block (between the <!-- coverage:start --> and <!-- coverage:end --> markers) lists EXACTLY these categories, one per line: ascii, numbers, punctuation.
+2. you append a new section that begins with the heading '## Revision v3:' explaining that the v2 eval showed numbers inputs failing (accuracy 0.29) so a bead is added to cover numbers.
+Keep all other content (the human-readable bead descriptions, the capability set, the rules). Do not invent categories. Return the whole markdown document now.
 
 ## Revision v3:
-- The v2 evaluation scored accuracy 0.29 and highlighted failures in the `numbers` category. To close this gap, a bead for `numbers` has been added to the coverage block, allowing the planner to generate a task that handles numeric token handling.
+The v2 evaluation showed that inputs containing numbers were failing, resulting in an overall accuracy of 0.29. To address this, a new bead for the `numbers` category has been added, expanding coverage to include `ascii`, `punctuation`, and `numbers`. This addition should improve tokenization correctness for numeric lines.
+
+----
+The latest eval (planner v3) scored accuracy 0.43. The input category 'code' is failing because the plan does not cover it. Rewrite the document so that:
+1. the coverage block (between the <!-- coverage:start --> and <!-- coverage:end --> markers) lists EXACTLY these categories, one per line: ascii, code, numbers, punctuation.
+2. you append a new section that begins with the heading '## Revision v4:' explaining that the v3 eval showed code inputs failing (accuracy 0.43) so a bead is added to cover code.
+Keep all other content (the human-readable bead descriptions, the capability set, the rules). Do not invent categories. Return the whole markdown document now.
 
 ## Revision v4:
-- The v3 evaluation scored accuracy 0.43 and highlighted failures in the `code` category. To close this gap, a bead for `code` has been added to the coverage block, allowing the planner to generate a task that handles source-code token handling.
+The v3 evaluation showed that inputs containing code markers were failing, resulting in an overall accuracy of 0.43. To address this, a new bead for the `code` category has been added, expanding coverage to include `ascii`, `punctuation`, `numbers`, and `code`. This addition should improve tokenization correctness for source‑code lines.
+
+----
+The latest eval (planner v4) scored accuracy 0.57. The input category 'unicode' is failing because the plan does not cover it. Rewrite the document so that:
+1. the coverage block (between the <!-- coverage:start --> and <!-- coverage:end --> markers) lists EXACTLY these categories, one per line: ascii, code, numbers, punctuation, unicode.
+2. you append a new section that begins with the heading '## Revision v5:' explaining that the v4 eval showed unicode inputs failing (accuracy 0.57) so a bead is added to cover unicode.
+Keep all other content (the human-readable bead descriptions, the capability set, the rules). Do not invent categories. Return the whole markdown document now.
 
 ## Revision v5:
-- The v4 evaluation scored accuracy 0.57 and highlighted failures in the `unicode` category. To close this gap, a bead for `unicode` has been added to the coverage block, allowing the planner to generate a task that handles byte-level UTF-8 for unicode text.
+The v4 evaluation showed that inputs containing Unicode text were failing, resulting in an overall accuracy of 0.57. To address this, a new bead for the `unicode` category has been added, expanding coverage to include `ascii`, `punctuation`, `numbers`, `code`, and `unicode`. This addition should improve tokenization correctness for non‑ASCII text.
+
+----
+The latest eval (planner v5) scored accuracy 0.71. The input category 'whitespace' is failing because the plan does not cover it. Rewrite the document so that:
+1. the coverage block (between the <!-- coverage:start --> and <!-- coverage:end --> markers) lists EXACTLY these categories, one per line: ascii, code, numbers, punctuation, unicode, whitespace.
+2. you append a new section that begins with the heading '## Revision v6:' explaining that the v5 eval showed whitespace inputs failing (accuracy 0.71) so a bead is added to cover whitespace.
+Keep all other content (the human-readable bead descriptions, the capability set, the rules). Do not invent categories. Return the whole markdown document now.
 
 ## Revision v6:
-- The v5 evaluation scored accuracy 0.71 and showed that inputs containing whitespace (leading/trailing spaces, tabs, double spaces) were still failing. To address this, a bead for `whitespace` has been added to the coverage block, enabling the planner to generate a task that ensures whitespace and spacing fidelity.
+The v5 evaluation showed that inputs containing whitespace variations were failing, resulting in an overall accuracy of 0.71. To address this, a new bead for the `whitespace` category has been added, expanding coverage to include `ascii`, `code`, `numbers`, `punctuation`, `unicode`, and `whitespace`. This addition should improve tokenization correctness for leading, trailing, and internal spacing cases.
+
+----
+The latest eval (planner v6) scored accuracy 0.86. The input category 'emoji' is failing because the plan does not cover it. Rewrite the document so that:
+1. the coverage block (between the <!-- coverage:start --> and <!-- coverage:end --> markers) lists EXACTLY these categories, one per line: ascii, code, emoji, numbers, punctuation, unicode, whitespace.
+2. you append a new section that begins with the heading '## Revision v7:' explaining that the v6 eval showed emoji inputs failing (accuracy 0.86) so a bead is added to cover emoji.
+Keep all other content (the human-readable bead descriptions, the capability set, the rules). Do not invent categories. Return the whole markdown document now.
 
 ## Revision v7:
-- The v6 evaluation scored accuracy 0.86 and revealed that inputs containing emoji were still failing. To close this remaining gap, a bead for `emoji` has been added to the coverage block, allowing the planner to generate a task that handles emoji and other multibyte sequences.
+The v6 evaluation showed that inputs containing emoji, dingbats, and other multibyte symbols were failing, resulting in an overall accuracy of 0.86. To address this, a new bead for the `emoji` category has been added, expanding coverage to include `ascii`, `code`, `numbers`, `punctuation`, `unicode`, `whitespace`, and `emoji`. This addition should improve tokenization correctness for emoji and other multibyte sequences.

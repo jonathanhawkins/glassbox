@@ -7,6 +7,7 @@
 // with { ssr: false } because tldraw touches window.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { Tldraw, type Editor, type TLComponents } from "tldraw";
 import "tldraw/tldraw.css";
 
@@ -20,6 +21,18 @@ import { CorrectnessCurve } from "./CorrectnessCurve";
 import { EventsTicker } from "./EventsTicker";
 import { LaunchControls } from "./LaunchControls";
 import { Legend } from "./Legend";
+
+// The CopilotKit command bar is client-only (GraphQL client + chat widget that
+// touch the browser), so it is loaded with { ssr: false }. The board + buttons
+// remain a fully working fallback if the chat is still booting.
+const CockpitCopilot = dynamic(() => import("./CockpitCopilot"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full w-full items-center justify-center text-xs text-slate-600">
+      booting copilot...
+    </div>
+  ),
+});
 
 const MAX_TICKER = 60;
 
@@ -212,24 +225,30 @@ export default function CockpitBoard() {
         </div>
       </div>
 
-      {/* Right rail: curve + ticker. Leaves room above for a future chat sidebar. */}
-      <aside className="pointer-events-none absolute bottom-5 right-5 top-28 z-20 flex w-[340px] flex-col gap-3">
-        <div className="pointer-events-auto h-[230px] shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
+      {/* Right rail: curve on top, the CopilotKit command bar filling the rail,
+          and a compact live event strip at the bottom. */}
+      <aside className="pointer-events-none absolute bottom-5 right-5 top-28 z-20 flex w-[380px] flex-col gap-3">
+        <div className="pointer-events-auto h-[210px] shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
           <CorrectnessCurve />
         </div>
-        {/* Reserved slot for the CopilotKit chat sidebar (later phase). */}
-        <div className="pointer-events-auto flex min-h-0 flex-1 flex-col rounded-2xl border border-dashed border-slate-700/40 bg-slate-950/50 p-3 backdrop-blur">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
+        {/* CopilotKit command bar (generative UI chat). Drives runs by chat and
+            renders the curve / leaderboard inline. */}
+        <div className="pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-cyan-500/25 bg-slate-950/70 backdrop-blur">
+          <div className="flex items-center justify-between border-b border-slate-800/70 px-3 py-2">
+            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-cyan-300/90">
               copilot
             </span>
-            <span className="rounded-full border border-slate-700/60 px-2 py-0.5 text-[9px] text-slate-600">
-              coming soon
+            <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[9px] text-cyan-300/90">
+              live
             </span>
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
-            <EventsTicker events={events} />
+            <CockpitCopilot />
           </div>
+        </div>
+        {/* Compact live event strip. */}
+        <div className="pointer-events-auto h-[150px] shrink-0 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
+          <EventsTicker events={events} />
         </div>
       </aside>
     </div>

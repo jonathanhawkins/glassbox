@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "wandb": {
+      "type": "http",
+      "url": "https://mcp.withwandb.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${WANDB_API_KEY}"
+      }
+    }
+  }
+}

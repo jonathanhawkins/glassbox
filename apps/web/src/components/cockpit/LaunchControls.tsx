@@ -1,20 +1,23 @@
 "use client";
 
-// Launch controls. POST /api/run kicks one graded run; POST /api/loop runs the
-// climbing self-improvement loop (the demo button). A small goal input lets us
-// retarget the swarm without code changes.
+// Launch controls (the always-available fallback to the chat command bar).
+// POST /api/run kicks one graded run; POST /api/loop runs the genuine
+// self-improvement climb (the headline demo); POST /api/live runs the
+// spot-a-gap inject beat. A small goal input retargets the swarm without code.
 
 import { useCallback, useState } from "react";
 
 const DEFAULT_GOAL = "port the BPE tokenizer to Rust";
 
+type Kind = "run" | "loop" | "live";
+
 export function LaunchControls() {
   const [goal, setGoal] = useState(DEFAULT_GOAL);
-  const [busy, setBusy] = useState<null | "run" | "loop">(null);
+  const [busy, setBusy] = useState<null | Kind>(null);
   const [note, setNote] = useState<string>("");
 
   const post = useCallback(
-    async (path: string, body: unknown, kind: "run" | "loop", label: string) => {
+    async (path: string, body: unknown, kind: Kind, label: string) => {
       setBusy(kind);
       setNote(`${label}...`);
       try {
@@ -44,7 +47,11 @@ export function LaunchControls() {
 
   const launchRun = () =>
     post("/api/run", { goal: goal || DEFAULT_GOAL }, "run", "Launch run");
-  const runClimb = () => post("/api/loop", { versions: 5 }, "loop", "Climb x5");
+  // The genuine improve_loop: resets the skill to baseline and climbs versions.
+  const runClimb = () =>
+    post("/api/loop", { goal: goal || DEFAULT_GOAL, max_versions: 7 }, "loop", "Climb");
+  const runLive = () =>
+    post("/api/live", { goal: goal || DEFAULT_GOAL, injections: 2 }, "live", "Live inject");
 
   return (
     <div className="flex flex-col gap-2">
@@ -71,6 +78,13 @@ export function LaunchControls() {
           {busy === "loop" ? "Climbing..." : "Run climb x5"}
         </button>
       </div>
+      <button
+        onClick={runLive}
+        disabled={busy !== null}
+        className="w-full rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:opacity-50"
+      >
+        {busy === "live" ? "Injecting..." : "Run live (inject)"}
+      </button>
       {note && <span className="truncate text-[10px] text-slate-500">{note}</span>}
     </div>
   );
