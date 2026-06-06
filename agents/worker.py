@@ -1,12 +1,15 @@
-"""Worker (skeleton): implement a bead by adding its capability to the run.
+"""Worker: implement a bead by adding its category to the run's covered set.
 
-In the capability model, a worker "implements" a bead by recording that bead's
-capability tag against the run. The validator later runs the oracle gated on the
-accumulated capability set, so as workers close beads the achievable correctness
-rises. The full worker (doing the real Rust edits in an isolated worktree,
-coordinating file leases over Agent Mail) lands in the next phase.
+In the capability model a worker "implements" a bead by recording that bead's
+category tag against the run. The validator later runs the oracle gated on the
+accumulated category set, so as workers close beads the achievable correctness
+rises (each category covered makes its slice of the corpus pass exact match).
 
-Interface the next phase will build on:
+The accumulated set is persisted to the Redis set ``glassbox:run:<run_id>:caps``
+(under the contract's runMetaPrefix) so the validator, the cockpit, and any other
+process can read what a run has covered, not just this Python process.
+
+Interface other pillars build on:
     run_bead(run_id, bead_id, capability, agent, planner_version) -> dict
     accumulated_capabilities(run_id) -> set[str]
 """
@@ -20,16 +23,20 @@ _paths.ensure_repo_root()
 
 import weave  # noqa: E402
 
+from contract.events import RUN_META_PREFIX  # noqa: E402
+
 from . import beads, bus  # noqa: E402
 
-# Per-run accumulated capabilities. The next phase will mirror this into Redis
-# (glassbox:run:<run_id> capabilities) so the validator and cockpit can read it.
-_RUN_CAPS: dict[str, set[str]] = {}
+
+def _caps_key(run_id: str) -> str:
+    """Redis set key holding the categories covered so far in this run."""
+    return f"{RUN_META_PREFIX}{run_id}:caps"
 
 
 def accumulated_capabilities(run_id: str) -> set[str]:
-    """Return the set of capability tags implemented so far in this run."""
-    return set(_RUN_CAPS.get(run_id, set()))
+    """Return the set of category tags covered so far in this run (from Redis)."""
+    members = bus.get_client().smembers(_caps_key(run_id))
+    return set(members) if members else set()
 
 
 @weave.op()
@@ -40,26 +47,29 @@ def run_bead(
     agent: str = "worker-1",
     planner_version: int = 1,
 ) -> dict[str, Any]:
-    """Implement one bead: add its capability, close the bead, emit bead_done.
+    """Implement one bead: add its category, close the bead, emit bead_done.
 
-    Skeleton: the real Rust work is not done here yet; we just record the
-    capability and close the bead so the dependency graph advances and the
-    validator has an accumulated capability set to grade against.
+    Records the bead's capability into the run's Redis set, emits agent_status
+    ``working`` then ``bead_done``, and closes the bead so the dependency graph
+    advances and the validator has a covered-category set to grade against. The
+    real Rust edits are not performed here; the category gating in the tokenizer
+    plus this accumulation is what makes the curve move honestly.
     """
     bus.set_agent_status(run_id, agent, "working", planner_version=planner_version)
 
     if capability:
-        _RUN_CAPS.setdefault(run_id, set()).add(capability)
+        bus.get_client().sadd(_caps_key(run_id), capability)
 
     beads.close(bead_id, reason=f"{agent} implemented capability={capability}")
 
+    caps_sorted = sorted(accumulated_capabilities(run_id))
     bus.emit_type(
         "bead_done",
         run_id,
         planner_version=planner_version,
         agent=agent,
         bead_id=bead_id,
-        payload={"capability": capability, "caps": sorted(_RUN_CAPS.get(run_id, set()))},
+        payload={"capability": capability, "caps": caps_sorted},
     )
     bus.set_agent_status(run_id, agent, "idle", planner_version=planner_version)
-    return {"bead_id": bead_id, "capability": capability, "caps": sorted(accumulated_capabilities(run_id))}
+    return {"bead_id": bead_id, "capability": capability, "caps": caps_sorted}

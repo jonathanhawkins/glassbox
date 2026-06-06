@@ -1,26 +1,35 @@
 """The planner: decompose the goal into the 8-bead capability graph.
 
-``plan(goal, run_id, planner_version)`` reads the editable skill at
+``plan(goal, run_id, planner_version, allowed_caps)`` reads the editable skill at
 agents/planner/SKILL.md, asks the LLM for a JSON array of beads
-(``[{title, capability, deps}]``), and falls back to the deterministic
-canonical plan if the LLM is unavailable. It then:
+(``[{title, capability, deps}]``), and falls back to the deterministic canonical
+plan if the LLM is unavailable. It then:
 
   - emits a ``plan_started`` event,
   - creates each bead via beads.create (wiring deps title -> id),
-  - emits a ``bead_created`` event per bead with payload {"capability": tag},
+  - emits a ``bead_created`` event per bead with payload {capability, deps},
 
 and returns the bead list including the assigned bead ids.
 
-The capability tag on each bead is the load-bearing convention: the worker maps
-bead -> capability to "implement" it (adds the capability to the run) and the
-validator runs the oracle gated on the accumulated capabilities.
+The capability tag on each bead is the load-bearing convention: it is one of the
+7 scoring CATEGORIES from contract/CAPABILITIES.md (plus the structural
+``harness``). The worker adds a bead's category to the run's accumulated set and
+the validator runs the oracle gated on that set, so an incomplete plan genuinely
+fails a class of inputs and the correctness curve climbs honestly as the improver
+adds the missing category beads.
+
+``allowed_caps`` lets the improver schedule a partial plan: when given, only the
+category beads whose capability is in ``allowed_caps`` are included, but the
+foundational ``ascii`` bead and the structural ``harness`` bead are ALWAYS kept
+(everything depends on ascii; harness is the pipeline). ``allowed_caps=None``
+means the full 8-bead plan.
 """
 from __future__ import annotations
 
 import json
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from . import _paths
 
@@ -33,47 +42,79 @@ from . import beads, bus, llm  # noqa: E402
 
 SKILL_PATH = Path(__file__).resolve().parent / "planner" / "SKILL.md"
 
-# The allowed capability tags. The worker/validator gate the oracle on these.
-CAPABILITIES = {
-    "merges",
-    "regex",
-    "byte_level",
-    "whitespace",
-    "special",
-    "encode",
-    "decode",
-    "harness",
-}
+# The 7 scoring categories (contract/CAPABILITIES.md), in coverage order, plus
+# the structural ``harness`` tag (accepted by the oracle but has no scoring
+# effect). ``ascii`` is the foundational category every other one depends on.
+FOUNDATIONAL = "ascii"
+STRUCTURAL = "harness"
 
-# Canonical deterministic decomposition. Used as the fallback and as the
-# ground-truth dependency shape. deps reference other titles in this list.
+# Category coverage order the improver climbs through (ascii first, emoji last).
+CATEGORY_ORDER: list[str] = [
+    "ascii",
+    "punctuation",
+    "numbers",
+    "code",
+    "unicode",
+    "whitespace",
+    "emoji",
+]
+
+# All allowed capability tags the planner/worker/validator agree on.
+CAPABILITIES = set(CATEGORY_ORDER) | {STRUCTURAL}
+
+# Canonical deterministic decomposition: the 8 beads of CAPABILITIES.md. Each
+# category bead makes its class of inputs pass; the structural harness bead wires
+# the pipeline. deps reference other titles in this list. Beads 2-7 depend on
+# bead 1 (ascii); bead 8 (harness) depends on beads 1-7.
 CANONICAL_PLAN: list[dict[str, Any]] = [
-    {"title": "load vocab and merge ranks", "capability": "merges", "deps": []},
-    {"title": "byte-level encoding", "capability": "byte_level", "deps": []},
-    {"title": "regex pre-tokenization", "capability": "regex", "deps": []},
-    {"title": "special-token handling", "capability": "special", "deps": []},
     {
-        "title": "BPE merge loop",
-        "capability": "merges",
-        "deps": ["load vocab and merge ranks"],
+        "title": "Core BPE and vocab load (plain ASCII text)",
+        "capability": "ascii",
+        "deps": [],
     },
     {
-        "title": "encode end to end",
-        "capability": "encode",
+        "title": "Regex pre-tokenization for punctuation and contractions",
+        "capability": "punctuation",
+        "deps": ["Core BPE and vocab load (plain ASCII text)"],
+    },
+    {
+        "title": "Numeric token handling",
+        "capability": "numbers",
+        "deps": ["Core BPE and vocab load (plain ASCII text)"],
+    },
+    {
+        "title": "Source-code token handling",
+        "capability": "code",
+        "deps": ["Core BPE and vocab load (plain ASCII text)"],
+    },
+    {
+        "title": "Byte-level UTF-8 for unicode text",
+        "capability": "unicode",
+        "deps": ["Core BPE and vocab load (plain ASCII text)"],
+    },
+    {
+        "title": "Whitespace and spacing fidelity",
+        "capability": "whitespace",
+        "deps": ["Core BPE and vocab load (plain ASCII text)"],
+    },
+    {
+        "title": "Emoji and multibyte sequences",
+        "capability": "emoji",
+        "deps": ["Core BPE and vocab load (plain ASCII text)"],
+    },
+    {
+        "title": "Encode/decode pipeline and oracle diff harness",
+        "capability": "harness",
         "deps": [
-            "load vocab and merge ranks",
-            "BPE merge loop",
-            "byte-level encoding",
-            "regex pre-tokenization",
-            "special-token handling",
+            "Core BPE and vocab load (plain ASCII text)",
+            "Regex pre-tokenization for punctuation and contractions",
+            "Numeric token handling",
+            "Source-code token handling",
+            "Byte-level UTF-8 for unicode text",
+            "Whitespace and spacing fidelity",
+            "Emoji and multibyte sequences",
         ],
     },
-    {
-        "title": "decode end to end",
-        "capability": "decode",
-        "deps": ["load vocab and merge ranks", "byte-level encoding"],
-    },
-    {"title": "oracle diff harness", "capability": "harness", "deps": []},
 ]
 
 
@@ -87,7 +128,6 @@ def _extract_json_array(text: str) -> Optional[list[Any]]:
 
     Tolerates code fences and surrounding prose. Returns None if nothing parses.
     """
-    # Strip ```json ... ``` fences if present.
     fenced = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL)
     candidate = fenced.group(1) if fenced else None
     if candidate is None:
@@ -128,10 +168,8 @@ def _normalize_plan(raw: list[Any]) -> Optional[list[dict[str, Any]]]:
         titles.add(title)
     if not cleaned:
         return None
-    # Drop dangling deps (titles not in the plan) so wiring never fails.
     for bead in cleaned:
         bead["deps"] = [d for d in bead["deps"] if d in titles]
-    # Topologically order so a dep is always created before its dependents.
     return _topo_sort(cleaned)
 
 
@@ -160,6 +198,26 @@ def _topo_sort(plan: list[dict[str, Any]]) -> Optional[list[dict[str, Any]]]:
         if not visit(b["title"]):
             return None
     return ordered
+
+
+def _filter_allowed(
+    spec: list[dict[str, Any]], allowed_caps: Optional[Iterable[str]]
+) -> list[dict[str, Any]]:
+    """Restrict a plan to ``allowed_caps`` category beads.
+
+    The foundational ``ascii`` bead and the structural ``harness`` bead are
+    always kept. Any dep pointing at a dropped bead is pruned, and the harness
+    bead's deps are reduced to the beads that remain, so wiring never dangles.
+    ``allowed_caps=None`` returns the spec unchanged (the full plan).
+    """
+    if allowed_caps is None:
+        return [dict(b) for b in spec]
+    allow = set(allowed_caps) | {FOUNDATIONAL, STRUCTURAL}
+    kept = [dict(b) for b in spec if b["capability"] in allow]
+    kept_titles = {b["title"] for b in kept}
+    for bead in kept:
+        bead["deps"] = [d for d in bead["deps"] if d in kept_titles]
+    return kept
 
 
 def _plan_from_llm(goal: str) -> Optional[list[dict[str, Any]]]:
@@ -199,10 +257,20 @@ def _plan_from_llm(goal: str) -> Optional[list[dict[str, Any]]]:
 
 
 @weave.op()
-def plan(goal: str, run_id: str, planner_version: int = 1) -> list[dict[str, Any]]:
+def plan(
+    goal: str,
+    run_id: str,
+    planner_version: int = 1,
+    allowed_caps: Optional[Iterable[str]] = None,
+) -> list[dict[str, Any]]:
     """Decompose ``goal`` into beads, create them, emit events, return the list.
 
-    Returns a list of bead dicts: {title, capability, deps (titles), id,
+    When ``allowed_caps`` is given, only category beads whose capability is in
+    that set are created (the foundational ``ascii`` bead and the structural
+    ``harness`` bead are always included). ``allowed_caps=None`` builds the full
+    8-bead plan.
+
+    Returns a list of bead dicts: {id, title, capability, deps (titles),
     dep_ids}. ``id`` is the created bead id; ``dep_ids`` are the bead ids this
     bead depends on. This is the structure the coordinator/worker consume.
     """
@@ -214,13 +282,26 @@ def plan(goal: str, run_id: str, planner_version: int = 1) -> list[dict[str, Any
         spec = [dict(b) for b in CANONICAL_PLAN]
         source = "deterministic"
 
+    # Apply the improver's category schedule, then re-topo-sort so deps still
+    # precede dependents after any pruning.
+    spec = _filter_allowed(spec, allowed_caps)
+    ordered = _topo_sort(spec)
+    if ordered is not None:
+        spec = ordered
+
+    allowed_list = sorted(allowed_caps) if allowed_caps is not None else None
     bus.emit_type(
         "plan_started",
         run_id,
         planner_version=planner_version,
         agent="planner",
         title=goal,
-        payload={"source": source, "bead_count": len(spec)},
+        payload={
+            "source": source,
+            "bead_count": len(spec),
+            "allowed_caps": allowed_list,
+            "capabilities": [b["capability"] for b in spec],
+        },
     )
 
     # Create beads in topological order, wiring deps by title -> created id.

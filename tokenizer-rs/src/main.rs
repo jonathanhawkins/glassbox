@@ -5,9 +5,11 @@
 // decode: first arg "decode"; read stdin line by line, each a JSON array of ids,
 //   print the decoded text.
 //
-// Capability gating: --caps <comma list> or GLASSBOX_CAPS env. If neither is
-// given, all capabilities are on (default output is exact). The literal "all"
-// means all on.
+// Category gating: --caps <comma list> or GLASSBOX_CAPS env names the ENABLED
+// categories. Each input line is classified into one category; if enabled it
+// gets exact token ids, otherwise a single wrong-token [0]. If neither --caps
+// nor env is given, all categories are on (default output is exact). The literal
+// "all" means all on. Structural names are accepted as no-ops.
 
 use std::io::{self, BufRead, Write};
 use std::process::exit;
@@ -198,8 +200,9 @@ fn print_help() {
     println!("  tok [encode] [--caps <list>]   encode stdin lines to JSON id arrays");
     println!("  tok decode   [--caps <list>]   decode stdin JSON id arrays to text");
     println!();
-    println!("CAPS (comma separated; default = all on; literal 'all' = all on):");
-    println!("  merges, regex, byte_level, whitespace, special, encode, decode, harness");
+    println!("CAPS = enabled categories (comma separated; default = all on; literal 'all' = all on):");
+    println!("  ascii, punctuation, numbers, code, unicode, emoji, whitespace");
+    println!("  (structural names merges, vocab, encode, decode, special, harness are accepted as no-ops)");
     println!();
     println!("DATA FILES (env override, else fallback):");
     println!("  GLASSBOX_RANKS  (default ../harness/data/gpt2.tiktoken or harness/data/...)");

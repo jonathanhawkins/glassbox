@@ -3,7 +3,11 @@ token IDs against tiktoken gpt2 ground truth (exact match per line).
 
 The Rust binary (tokenizer-rs/target/release/tok) reads stdin lines and prints
 one JSON array of token IDs per line. It accepts --caps (comma separated list of
-enabled capabilities; omitted means all capabilities, i.e. exact tokenization).
+enabled CATEGORIES; omitted, empty, or the literal "all" means every category is
+enabled, i.e. exact tokenization). The categories are the 7 scoring tags from
+contract/CAPABILITIES.md: ascii, punctuation, numbers, code, unicode, emoji,
+whitespace (structural tags like harness are accepted but have no scoring
+effect).
 
 This module is defensive on purpose: the Rust binary is built in parallel and may
 be missing, a stub (no output), or partially implemented (wrong line count, bad
@@ -11,7 +15,7 @@ JSON). In every such case run_oracle returns accuracy 0.0 with a clear error
 string instead of raising, so the self-improvement loop never crashes.
 
 CLI:
-  uv run python -m harness.oracle [--caps merges,regex,byte_level,whitespace]
+  uv run python -m harness.oracle [--caps ascii,punctuation,numbers]
 """
 from __future__ import annotations
 
@@ -98,8 +102,8 @@ def run_oracle(
 
     Args:
       bin_path: path to the tok binary. Defaults to tokenizer-rs/target/release/tok.
-      caps: capabilities to enable, as a list ["merges", "regex", ...] or a comma
-            separated string. None or empty means all capabilities (exact).
+      caps: categories to enable, as a list ["ascii", "numbers", ...] or a comma
+            separated string. None or empty means all categories (exact).
       fixtures: path to fixtures.jsonl (the read-only ground truth).
 
     Returns a dict:
@@ -240,7 +244,7 @@ def _main() -> None:
     ap.add_argument(
         "--caps",
         default=None,
-        help="comma separated capabilities (omit for all = exact)",
+        help="comma separated categories (omit for all = exact)",
     )
     ap.add_argument("--fixtures", default=str(DEFAULT_FIXTURES))
     args = ap.parse_args()

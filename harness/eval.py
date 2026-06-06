@@ -16,7 +16,7 @@ What this does, end to end:
 
 CLI:
   uv run python -m harness.eval --planner-version 1 \
-      --caps merges,regex,byte_level,whitespace
+      --caps ascii,punctuation,numbers
 """
 from __future__ import annotations
 
@@ -160,7 +160,7 @@ def evaluate(
 
     Args:
       planner_version: integer version that becomes the leaderboard member.
-      caps: capabilities to enable (list or comma string); None = all = exact.
+      caps: categories to enable (list or comma string); None = all = exact.
       run_id: optional run id; if set a planner_rewrite event is emitted.
       bin_path: override the tokenizer binary path.
       fixtures: path to fixtures.jsonl.
@@ -294,7 +294,7 @@ def _main() -> None:
     ap.add_argument(
         "--caps",
         default=None,
-        help="comma separated capabilities (omit for all = exact)",
+        help="comma separated categories (omit for all = exact)",
     )
     ap.add_argument("--run-id", default="")
     ap.add_argument("--bin", default=None, help="path to the tok binary")

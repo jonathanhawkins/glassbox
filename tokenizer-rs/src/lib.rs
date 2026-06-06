@@ -5,8 +5,14 @@
 //  2. For each piece, byte_pair_encode over its UTF-8 bytes against the rank map.
 //  3. Concatenate piece outputs in order. No special/BOS/EOS tokens.
 //
-// Capability gating powers the self improvement curve. With all caps on the
-// output is exact. Each cap turned off intentionally degrades a subset of lines.
+// CATEGORY GATING powers the self-improvement curve (contract/CAPABILITIES.md).
+// Every input line is classified into exactly ONE of 7 categories by a fixed
+// priority order. The CLI enables a SET of categories via --caps. For each line:
+//   - if its category is enabled, emit the CORRECT token ids (the exact tiktoken
+//     algorithm below, unchanged);
+//   - if its category is NOT enabled, emit a single deterministic wrong token [0]
+//     so the line fails the oracle's exact-match.
+// With all categories on (the default), output is byte-for-byte exact (100%).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -14,56 +20,157 @@ use std::path::Path;
 use base64::Engine as _;
 use fancy_regex::Regex;
 
-/// Capability flags. When a flag is false the encoder degrades on purpose.
-#[derive(Clone, Copy, Debug)]
-pub struct Caps {
-    /// BPE merging. Off: emit one rank per single byte.
-    pub merges: bool,
-    /// gpt2 regex pretokenization. Off: simple ASCII whitespace split.
-    pub regex: bool,
-    /// byte level coverage. Off: drop bytes >= 128 from each piece.
-    pub byte_level: bool,
-    /// whitespace fidelity. Off: trim and collapse spaces in each piece.
-    pub whitespace: bool,
-    // The flags below are accepted for contract completeness but never change
-    // the output (they are always structurally on).
-    pub special: bool,
-    pub encode: bool,
-    pub decode: bool,
-    pub harness: bool,
+/// The 7 scoring categories. Each input line belongs to exactly one, chosen by
+/// the priority order in `classify` (first match wins). See CAPABILITIES.md.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Category {
+    /// Any codepoint >= 0x2600 (emoji, dingbats, symbols). Highest priority.
+    Emoji,
+    /// Any non-ASCII codepoint (>= 0x80) and not Emoji.
+    Unicode,
+    /// Any code marker substring (def , fn , let , const , SELECT , git , (); , -> , :: , { } [ ]).
+    Code,
+    /// Any ASCII digit 0-9.
+    Numbers,
+    /// Leading space, trailing space, a tab, or an internal double-space.
+    Whitespace,
+    /// Any of ' " ! ? ( ) ; : , . / [ ] { }.
+    Punctuation,
+    /// Default: plain ASCII letters and single spaces.
+    Ascii,
 }
 
-impl Caps {
-    /// All capabilities on. This is the default and produces exact output.
-    pub fn all_on() -> Self {
-        Caps {
-            merges: true,
-            regex: true,
-            byte_level: true,
-            whitespace: true,
-            special: true,
-            encode: true,
-            decode: true,
-            harness: true,
+impl Category {
+    /// The canonical lowercase tag used on the --caps list and in fixtures.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Category::Emoji => "emoji",
+            Category::Unicode => "unicode",
+            Category::Code => "code",
+            Category::Numbers => "numbers",
+            Category::Whitespace => "whitespace",
+            Category::Punctuation => "punctuation",
+            Category::Ascii => "ascii",
         }
     }
 
-    /// All capabilities off.
+    /// Index for the enabled-flags array.
+    fn index(self) -> usize {
+        match self {
+            Category::Emoji => 0,
+            Category::Unicode => 1,
+            Category::Code => 2,
+            Category::Numbers => 3,
+            Category::Whitespace => 4,
+            Category::Punctuation => 5,
+            Category::Ascii => 6,
+        }
+    }
+
+    /// Parse a category tag (case-insensitive). Structural names and unknown
+    /// tokens return None (they do not gate scoring).
+    fn from_tag(name: &str) -> Option<Category> {
+        match name.to_ascii_lowercase().as_str() {
+            "emoji" => Some(Category::Emoji),
+            "unicode" => Some(Category::Unicode),
+            "code" => Some(Category::Code),
+            "numbers" => Some(Category::Numbers),
+            "whitespace" => Some(Category::Whitespace),
+            "punctuation" => Some(Category::Punctuation),
+            "ascii" => Some(Category::Ascii),
+            _ => None,
+        }
+    }
+}
+
+/// Code marker substrings. If a line contains any of these it is `Code`
+/// (priority 3), unless it was already `Emoji` or `Unicode`.
+const CODE_MARKERS: [&str; 13] = [
+    "def ", "fn ", "let ", "const ", "SELECT ", "git ", "();", "->", "::", "{",
+    "}", "[", "]",
+];
+
+/// Punctuation set: ' " ! ? ( ) ; : , . / [ ] { }.
+fn is_punct(c: char) -> bool {
+    matches!(
+        c,
+        '\'' | '"' | '!' | '?' | '(' | ')' | ';' | ':' | ',' | '.' | '/' | '[' | ']' | '{' | '}'
+    )
+}
+
+/// Classify a single line into exactly one category by priority order.
+/// First match wins; this is the authoritative gating decision.
+pub fn classify(line: &str) -> Category {
+    // 1 emoji: any codepoint >= 0x2600.
+    if line.chars().any(|c| (c as u32) >= 0x2600) {
+        return Category::Emoji;
+    }
+    // 2 unicode: any non-ASCII codepoint (>= 0x80) and not emoji.
+    if line.chars().any(|c| (c as u32) >= 0x80) {
+        return Category::Unicode;
+    }
+    // 3 code: any code marker substring.
+    if CODE_MARKERS.iter().any(|m| line.contains(m)) {
+        return Category::Code;
+    }
+    // 4 numbers: any ASCII digit.
+    if line.bytes().any(|b| b.is_ascii_digit()) {
+        return Category::Numbers;
+    }
+    // 5 whitespace: leading/trailing space, a tab, or an internal double-space.
+    if line.starts_with(' ')
+        || line.ends_with(' ')
+        || line.contains('\t')
+        || line.contains("  ")
+    {
+        return Category::Whitespace;
+    }
+    // 6 punctuation: any char in the punctuation set.
+    if line.chars().any(is_punct) {
+        return Category::Punctuation;
+    }
+    // 7 ascii: default.
+    Category::Ascii
+}
+
+/// The enabled set of scoring categories. A line whose category is enabled gets
+/// exact token ids; otherwise it gets the wrong-token sentinel [0].
+#[derive(Clone, Copy, Debug)]
+pub struct Caps {
+    /// Indexed by Category::index(): true means that category is enabled.
+    enabled: [bool; 7],
+}
+
+/// The deterministic wrong-token id emitted for a disabled line.
+pub const WRONG_TOKEN: u32 = 0;
+
+impl Caps {
+    /// All categories on. This is the default and produces exact output.
+    pub fn all_on() -> Self {
+        Caps { enabled: [true; 7] }
+    }
+
+    /// All categories off.
     pub fn all_off() -> Self {
         Caps {
-            merges: false,
-            regex: false,
-            byte_level: false,
-            whitespace: false,
-            special: false,
-            encode: false,
-            decode: false,
-            harness: false,
+            enabled: [false; 7],
         }
     }
 
-    /// Parse a comma separated capability list. The literal "all" means all on.
-    /// Unknown tokens are ignored. An empty string yields all off.
+    /// Whether a category is enabled.
+    pub fn is_enabled(&self, cat: Category) -> bool {
+        self.enabled[cat.index()]
+    }
+
+    /// Enable a single category.
+    pub fn enable(&mut self, cat: Category) {
+        self.enabled[cat.index()] = true;
+    }
+
+    /// Parse a comma separated capability list. The literal "all" (anywhere)
+    /// means all categories on. Recognized category tags are enabled; structural
+    /// names (merges, vocab, encode, decode, special, harness) and any unknown
+    /// tokens are accepted as no-ops. An empty string yields all off.
     pub fn parse(spec: &str) -> Self {
         let spec = spec.trim();
         if spec.eq_ignore_ascii_case("all") {
@@ -78,17 +185,10 @@ impl Caps {
             if name.eq_ignore_ascii_case("all") {
                 return Caps::all_on();
             }
-            match name.to_ascii_lowercase().as_str() {
-                "merges" => caps.merges = true,
-                "regex" => caps.regex = true,
-                "byte_level" | "bytelevel" => caps.byte_level = true,
-                "whitespace" => caps.whitespace = true,
-                "special" => caps.special = true,
-                "encode" => caps.encode = true,
-                "decode" => caps.decode = true,
-                "harness" => caps.harness = true,
-                _ => {}
+            if let Some(cat) = Category::from_tag(name) {
+                caps.enable(cat);
             }
+            // else: structural name or unknown token -> no-op (no scoring effect).
         }
         caps
     }
@@ -146,85 +246,46 @@ impl Tokenizer {
         self.ranks.len()
     }
 
-    /// Encode text into token ids (encode-ordinary, no special tokens).
+    /// Encode text into token ids with category gating.
+    ///
+    /// The line is classified into one category. If that category is enabled in
+    /// `caps`, the exact tiktoken algorithm runs and the correct ids are emitted.
+    /// If it is disabled, a single wrong-token sentinel [0] is emitted so the
+    /// oracle's exact-match fails for that line.
     pub fn encode(&self, text: &str, caps: &Caps) -> Vec<u32> {
+        let cat = classify(text);
+        if !caps.is_enabled(cat) {
+            return vec![WRONG_TOKEN];
+        }
+        self.encode_exact(text)
+    }
+
+    /// The exact tiktoken gpt2 encode-ordinary (no gating, no special tokens).
+    /// This is the unchanged correctness path used for every enabled line.
+    pub fn encode_exact(&self, text: &str) -> Vec<u32> {
         let mut out: Vec<u32> = Vec::new();
-        for piece in self.pretokenize(text, caps) {
-            let piece_bytes = self.shape_piece(piece, caps);
-            self.encode_piece(&piece_bytes, caps, &mut out);
+        for piece in self.pretokenize(text) {
+            self.encode_piece(piece.as_bytes(), &mut out);
         }
         out
     }
 
-    /// Pretokenize the text into pieces (each a slice of the original string).
-    fn pretokenize<'a>(&self, text: &'a str, caps: &Caps) -> Vec<&'a str> {
-        if caps.regex {
-            let mut pieces = Vec::new();
-            for m in self.pattern.find_iter(text) {
-                // fancy-regex returns Result; on the gpt2 pattern over valid
-                // UTF-8 this does not error, but be defensive.
-                if let Ok(m) = m {
-                    pieces.push(m.as_str());
-                }
+    /// Pretokenize the text into pieces with the gpt2 regex (verbatim).
+    fn pretokenize<'a>(&self, text: &'a str) -> Vec<&'a str> {
+        let mut pieces = Vec::new();
+        for m in self.pattern.find_iter(text) {
+            // fancy-regex returns Result; on the gpt2 pattern over valid UTF-8
+            // this does not error, but be defensive.
+            if let Ok(m) = m {
+                pieces.push(m.as_str());
             }
-            pieces
-        } else {
-            // regex OFF: simple ASCII whitespace split. Splitting on runs of
-            // ASCII whitespace drops the whitespace entirely, so spacing and
-            // leading space markers are lost and lines mismatch.
-            text.split_ascii_whitespace().collect()
         }
-    }
-
-    /// Apply whitespace and byte_level shaping to a piece, producing the byte
-    /// sequence that will be fed to BPE. With all caps on this is just the
-    /// piece's UTF-8 bytes unchanged.
-    fn shape_piece(&self, piece: &str, caps: &Caps) -> Vec<u8> {
-        // whitespace shaping operates on the string first.
-        let shaped: std::borrow::Cow<str> = if caps.whitespace {
-            std::borrow::Cow::Borrowed(piece)
-        } else {
-            // whitespace OFF: trim leading/trailing ASCII spaces and collapse
-            // internal runs of spaces to a single space.
-            let trimmed = piece.trim_matches(' ');
-            let mut collapsed = String::with_capacity(trimmed.len());
-            let mut prev_space = false;
-            for ch in trimmed.chars() {
-                if ch == ' ' {
-                    if !prev_space {
-                        collapsed.push(' ');
-                    }
-                    prev_space = true;
-                } else {
-                    collapsed.push(ch);
-                    prev_space = false;
-                }
-            }
-            std::borrow::Cow::Owned(collapsed)
-        };
-
-        let bytes = shaped.as_bytes();
-        if caps.byte_level {
-            bytes.to_vec()
-        } else {
-            // byte_level OFF: drop any byte >= 128 so unicode/emoji mismatch.
-            bytes.iter().copied().filter(|&b| b < 128).collect()
-        }
+        pieces
     }
 
     /// Encode a single piece's bytes, appending ids to `out`.
-    fn encode_piece(&self, piece: &[u8], caps: &Caps, out: &mut Vec<u32>) {
+    fn encode_piece(&self, piece: &[u8], out: &mut Vec<u32>) {
         if piece.is_empty() {
-            return;
-        }
-        if !caps.merges {
-            // merges OFF: emit one rank per single byte (every byte 0..=255 has
-            // a rank in gpt2). No byte pair merging happens.
-            for &b in piece {
-                if let Some(&r) = self.ranks.get(&[b][..]) {
-                    out.push(r);
-                }
-            }
             return;
         }
         // Fast path: the whole piece is a known token.
@@ -395,11 +456,50 @@ mod tests {
         load_default().expect("load tokenizer")
     }
 
+    // ----- classification rules (priority order) -----
+
     #[test]
-    fn hello_world() {
+    fn classify_priority() {
+        assert_eq!(classify("plain ascii words only here"), Category::Ascii);
+        assert_eq!(classify("Hello, world!"), Category::Punctuation);
+        assert_eq!(classify("there were 42 of them"), Category::Numbers);
+        assert_eq!(classify("def foo bar"), Category::Code);
+        assert_eq!(classify("the map [here]"), Category::Code); // brackets are code markers
+        assert_eq!(classify("Caf\u{e9} is nice"), Category::Unicode);
+        assert_eq!(classify("rocket \u{1F680}"), Category::Emoji);
+        assert_eq!(classify("\u{2600} sun"), Category::Emoji); // exactly 0x2600
+    }
+
+    #[test]
+    fn classify_whitespace_variants() {
+        assert_eq!(classify("  leading words here"), Category::Whitespace);
+        assert_eq!(classify("trailing words here "), Category::Whitespace);
+        assert_eq!(classify("tab\there words"), Category::Whitespace);
+        assert_eq!(classify("double  space words"), Category::Whitespace);
+        // A digit beats whitespace (priority 4 > 5).
+        assert_eq!(classify("  leading 7 spaces"), Category::Numbers);
+        // Punctuation is lower than whitespace: a trailing space still wins.
+        assert_eq!(classify("hello there friend "), Category::Whitespace);
+    }
+
+    // ----- exact encode (all categories on) -----
+
+    #[test]
+    fn hello_world_exact() {
         let t = tk();
         let caps = Caps::all_on();
         assert_eq!(t.encode("Hello, world!", &caps), vec![15496, 11, 995, 0]);
+    }
+
+    #[test]
+    fn encode_exact_matches_gated_when_enabled() {
+        let t = tk();
+        // The same line, gated on its own category, equals the exact path.
+        let line = "there were 42 of them";
+        let exact = t.encode_exact(line);
+        let mut caps = Caps::all_off();
+        caps.enable(Category::Numbers);
+        assert_eq!(t.encode(line, &caps), exact);
     }
 
     #[test]
@@ -410,16 +510,82 @@ mod tests {
         assert_eq!(t.decode(&ids), "The quick brown fox.");
     }
 
+    // ----- gating: disabled category -> wrong-token sentinel -----
+
+    #[test]
+    fn disabled_category_emits_wrong_token() {
+        let t = tk();
+        // Emoji line, but emoji category is off -> single [0].
+        let mut caps = Caps::all_off();
+        caps.enable(Category::Ascii);
+        assert_eq!(t.encode("rocket \u{1F680}", &caps), vec![WRONG_TOKEN]);
+    }
+
+    #[test]
+    fn enabled_category_emits_correct_tokens() {
+        let t = tk();
+        // ascii line, ascii enabled -> exact ids (not [0]).
+        let mut caps = Caps::all_off();
+        caps.enable(Category::Ascii);
+        let line = "hello there friend";
+        assert_eq!(classify(line), Category::Ascii);
+        assert_eq!(t.encode(line, &caps), t.encode_exact(line));
+        assert_ne!(t.encode(line, &caps), vec![WRONG_TOKEN]);
+    }
+
+    // ----- caps parsing -----
+
     #[test]
     fn caps_parse_all() {
         let c = Caps::parse("all");
-        assert!(c.merges && c.regex && c.byte_level && c.whitespace);
+        for cat in [
+            Category::Ascii,
+            Category::Punctuation,
+            Category::Numbers,
+            Category::Code,
+            Category::Unicode,
+            Category::Emoji,
+            Category::Whitespace,
+        ] {
+            assert!(c.is_enabled(cat));
+        }
     }
 
     #[test]
     fn caps_parse_subset() {
-        let c = Caps::parse("merges,regex");
-        assert!(c.merges && c.regex);
-        assert!(!c.byte_level && !c.whitespace);
+        let c = Caps::parse("ascii,punctuation");
+        assert!(c.is_enabled(Category::Ascii));
+        assert!(c.is_enabled(Category::Punctuation));
+        assert!(!c.is_enabled(Category::Numbers));
+        assert!(!c.is_enabled(Category::Emoji));
+    }
+
+    #[test]
+    fn caps_parse_structural_names_are_noops() {
+        // Structural names enable nothing; with only structural names, all off.
+        let c = Caps::parse("merges,vocab,encode,decode,special,harness");
+        for cat in [
+            Category::Ascii,
+            Category::Punctuation,
+            Category::Numbers,
+            Category::Code,
+            Category::Unicode,
+            Category::Emoji,
+            Category::Whitespace,
+        ] {
+            assert!(!c.is_enabled(cat));
+        }
+        // Mixed: a real category plus structural names enables only the category.
+        let c2 = Caps::parse("harness,emoji,merges");
+        assert!(c2.is_enabled(Category::Emoji));
+        assert!(!c2.is_enabled(Category::Ascii));
+    }
+
+    #[test]
+    fn caps_parse_empty_is_all_off() {
+        let c = Caps::parse("");
+        for cat in [Category::Ascii, Category::Emoji, Category::Numbers] {
+            assert!(!c.is_enabled(cat));
+        }
     }
 }
