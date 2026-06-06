@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "ports": {
+    "frontend": 3100,
+    "backend": 8100
+  },
+  "redis": {
+    "urlEnv": "REDIS_URL",
+    "eventsStream": "glassbox:events",
+    "plannerScores": "glassbox:planner_scores",
+    "beadsState": "glassbox:beads",
+    "runsList": "glassbox:runs",
+    "runMetaPrefix": "glassbox:run:"
+  },
+  "eventTypes": [
+    "run_started",
+    "plan_started",
+    "bead_created",
+    "bead_claimed",
+    "bead_done",
+    "plan_gap_found",
+    "bead_injected",
+    "validation_passed",
+    "validation_failed",
+    "planner_rewrite",
+    "run_finished",
+    "agent_status",
+    "log"
+  ],
+  "agentStatus": ["idle", "working", "done", "failed"],
+  "agents": [
+    "planner",
+    "coordinator",
+    "worker-1",
+    "worker-2",
+    "worker-3",
+    "worker-4",
+    "validator",
+    "improver"
+  ]
+}

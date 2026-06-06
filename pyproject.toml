@@ -1,0 +1,24 @@
+[project]
+name = "glassbox-agents"
+version = "0.0.0"
+description = "Glassbox swarm: planner, coordinator, workers, validator, improver."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "weave",
+    "wandb",
+    "tiktoken",
+    "redis",
+    "fastapi",
+    "uvicorn[standard]",
+    "openai",
+    "python-dotenv",
+    "httpx",
+    "pydantic",
+    "rich",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = []

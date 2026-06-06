@@ -1,0 +1,15 @@
+{
+  "name": "glassbox",
+  "private": true,
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "redis": "bash scripts/redis.sh",
+    "web": "pnpm --filter web dev",
+    "backend": "bash scripts/backend.sh",
+    "dev": "bash scripts/dev.sh",
+    "smoke": "uv run python scripts/smoke.py"
+  }
+}

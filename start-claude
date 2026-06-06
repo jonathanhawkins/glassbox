@@ -1,0 +1,20 @@
+#!/bin/sh
+# Launch a fresh Claude Code session for the WeaveHacks4 hackathon inside its
+# own named tmux session. Re-run to spin up additional parallel sessions.
+
+# Find the next free weavehacks-N tmux session name (starts at 0)
+i=0
+while tmux has-session -t "weavehacks-$i" 2>/dev/null; do
+  i=$((i + 1))
+done
+SESSION_NAME="weavehacks-$i"
+
+# Launch claude inside a fresh, named tmux session
+tmux new-session -d -s "$SESSION_NAME" 'CLAUDE_CODE_TASK_LIST_ID=weavehacks CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1 CLAUDE_AUTO_BACKGROUND_TASKS=1 CLAUDE_CODE_NO_FLICKER=1 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 MAX_THINKING_TOKENS=50000 CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=40 claude --dangerously-skip-permissions --chrome --teammate-mode tmux'
+
+# Attach (or switch, if we were already inside tmux)
+if [ -n "$TMUX" ]; then
+  tmux switch-client -t "$SESSION_NAME"
+else
+  tmux attach -t "$SESSION_NAME"
+fi

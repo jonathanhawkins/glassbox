@@ -1,0 +1,38 @@
+# deps
+node_modules/
+.pnpm-store/
+.venv/
+__pycache__/
+*.pyc
+
+# builds
+.next/
+dist/
+out/
+target/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env*.local
+!.env.example
+
+# weave / wandb
+wandb/
+.weave/
+
+# beads (local db; JSONL is committed)
+.beads/*.db
+.beads/*.db-shm
+.beads/*.db-wal
+.beads/*.lock
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# misc
+.turbo/
+coverage/
