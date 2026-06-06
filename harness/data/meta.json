@@ -1,0 +1,8 @@
+{
+  "encoding": "gpt2",
+  "n_vocab": 50257,
+  "pattern": "'(?:[sdmt]|ll|ve|re)| ?\\p{L}++| ?\\p{N}++| ?[^\\s\\p{L}\\p{N}]++|\\s++$|\\s+(?!\\S)|\\s",
+  "special_tokens": {
+    "<|endoftext|>": 50256
+  }
+}
