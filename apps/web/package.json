@@ -9,9 +9,16 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@copilotkit/react-core": "^1.59.5",
+    "@copilotkit/react-ui": "^1.59.5",
+    "@copilotkit/runtime": "^1.59.5",
+    "@glassbox/contract": "workspace:*",
+    "ioredis": "^5.11.1",
     "next": "16.2.7",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "recharts": "^3.8.1",
+    "tldraw": "^5.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -1,0 +1,20 @@
+[package]
+name = "glassbox_tokenizer"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "glassbox_tokenizer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tok"
+path = "src/main.rs"
+
+[dependencies]
+fancy-regex = "0.13"
+base64 = "0.22"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
