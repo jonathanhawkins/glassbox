@@ -112,16 +112,37 @@ export class BoardController {
     this.frameCamera();
   }
 
-  /** Lock the camera onto the fixed board region and disable user panning/zoom. */
+  /**
+   * Frame the board so the whole scene is visible in the clear center by
+   * default, then hand camera control back to the user (wheel to zoom, drag to
+   * pan). We use tldraw camera *constraints* with padding so the fit accounts
+   * for the floating side docks (left controls/legend, right
+   * curve/copilot/ticker) and the top header. This keeps the validator/improver
+   * lanes and the done rail from hiding underneath those panels on load, while
+   * still letting you zoom out to see more.
+   */
   frameCamera() {
-    this.editor.zoomToBounds(BOARD_BOUNDS, { inset: 48, animation: { duration: 0 } });
     this.editor.setCameraOptions({
-      isLocked: true,
-      panSpeed: 0,
-      zoomSpeed: 0,
-      wheelBehavior: "none",
-      zoomSteps: [this.editor.getZoomLevel()],
+      isLocked: false,
+      panSpeed: 1,
+      zoomSpeed: 1,
+      // zoomSteps are relative to the fit-max base zoom: 1 = whole board fits,
+      // < 1 = zoomed out (smaller, more headroom), > 1 = zoomed in.
+      zoomSteps: [0.2, 0.35, 0.5, 0.7, 1, 1.4, 2, 3],
+      wheelBehavior: "zoom",
+      constraints: {
+        bounds: BOARD_BOUNDS,
+        // Screen-space padding: clear the ~400px right rail / ~300px left dock
+        // on x, and the top header on y.
+        padding: { x: 400, y: 110 },
+        origin: { x: 0.5, y: 0.5 },
+        initialZoom: "fit-max",
+        baseZoom: "fit-max",
+        behavior: "contain",
+      },
     });
+    // Apply the initial (fit-max) framing now that constraints are set.
+    this.editor.setCamera(this.editor.getCamera(), { reset: true, immediate: true });
   }
 
   /** Remove every shape (agents + beads) and reset bookkeeping. */
