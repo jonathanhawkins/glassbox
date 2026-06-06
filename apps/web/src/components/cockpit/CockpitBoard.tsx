@@ -12,6 +12,7 @@ import { Tldraw, type Editor, type TLComponents } from "tldraw";
 import "tldraw/tldraw.css";
 
 import type { GlassboxEvent } from "@glassbox/contract";
+import type { SkillState } from "@/lib/cockpit/types";
 
 import { BoardController } from "@/lib/cockpit/board";
 import { RoutingEdges } from "@/lib/cockpit/RoutingEdges";
@@ -21,6 +22,7 @@ import { CorrectnessCurve } from "./CorrectnessCurve";
 import { EventsTicker } from "./EventsTicker";
 import { LaunchControls } from "./LaunchControls";
 import { Legend } from "./Legend";
+import { PlannerSkillPanel } from "./PlannerSkillPanel";
 
 // The CopilotKit command bar is client-only (GraphQL client + chat widget that
 // touch the browser), so it is loaded with { ssr: false }. The board + buttons
@@ -72,12 +74,14 @@ export default function CockpitBoard() {
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [events, setEvents] = useState<GlassboxEvent[]>([]);
   const [sseOpen, setSseOpen] = useState(false);
+  const [skill, setSkill] = useState<SkillState | null>(null);
 
   const handleMount = useCallback((editor: Editor) => {
     const controller = new BoardController(editor);
     controller.onGoal = (g) => setGoal(g);
     controller.onPlannerVersion = (v) => setVersion(v);
     controller.onFinished = (a) => setAccuracy(a);
+    controller.onSkill = (s) => setSkill(s);
     controller.layout();
     controllerRef.current = controller;
 
@@ -90,16 +94,28 @@ export default function CockpitBoard() {
       } catch {
         // empty board is fine
       }
+      let lastVersion = 1;
+      let lastAccuracy: number | null = null;
       try {
         const res = await fetch("/api/leaderboard", { cache: "no-store" });
         const rows = (await res.json()) as { version: number; accuracy: number }[];
         if (Array.isArray(rows) && rows.length) {
           const last = rows[rows.length - 1];
+          lastVersion = last.version;
+          lastAccuracy = last.accuracy;
           setVersion(last.version);
           setAccuracy(last.accuracy);
         }
       } catch {
         // no curve yet is fine
+      }
+      try {
+        const res = await fetch("/api/skill", { cache: "no-store" });
+        const data = (await res.json()) as { covered?: string[] };
+        const covered = Array.isArray(data?.covered) ? data.covered : [];
+        controller.hydrateSkill(covered, lastVersion, lastAccuracy);
+      } catch {
+        // no skill snapshot yet is fine
       }
     })();
 
@@ -251,6 +267,13 @@ export default function CockpitBoard() {
           <EventsTicker events={events} />
         </div>
       </aside>
+
+      {/* Planner skill evolution strip: the self-improvement made visible. */}
+      {skill && (
+        <div className="pointer-events-none absolute bottom-5 left-1/2 z-20 w-[min(560px,44vw)] -translate-x-1/2">
+          <PlannerSkillPanel skill={skill} />
+        </div>
+      )}
     </div>
   );
 }

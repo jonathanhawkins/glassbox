@@ -76,6 +76,15 @@ function Suggestions() {
 // set and override a few to match the cockpit palette (cyan primary on
 // near-black slate).
 const CHAT_THEME: CSSProperties = {
+  // Match the cockpit typography: the v2 chat defaults to system ui-sans-serif,
+  // which renders large and out of character next to the Geist-based cockpit.
+  // The chat resolves --cpk-default-font-family from --cpk-font-sans at :root,
+  // so the already-resolved default tokens are what we override here (setting
+  // --cpk-font-sans alone would not re-resolve). Point them at Geist.
+  ["--cpk-default-font-family" as string]:
+    "var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif",
+  ["--cpk-default-mono-font-family" as string]:
+    "var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace",
   // Cockpit-flavored overrides of the v2 design tokens.
   ["--background" as string]: "oklch(13% 0.02 250)",
   ["--card" as string]: "oklch(15% 0.02 250)",

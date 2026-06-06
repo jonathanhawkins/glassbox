@@ -69,3 +69,45 @@ export async function proxyPost(path: string, req: Request): Promise<Response> {
 
   return Response.json(payload, { status: upstream.status });
 }
+
+/**
+ * Forward a GET to `path` on the backend and relay its JSON response. Returns a
+ * clean 502 JSON when the backend is unreachable or replies with a non-JSON
+ * body, so callers always get parseable JSON.
+ */
+export async function proxyGet(path: string): Promise<Response> {
+  const target = `${BACKEND_URL}${path}`;
+  let upstream: globalThis.Response;
+  try {
+    upstream = await fetch(target, { method: "GET", cache: "no-store" });
+  } catch (err) {
+    return Response.json(
+      {
+        ok: false,
+        error: "backend_unreachable",
+        detail: `could not reach backend at ${target}`,
+        target,
+        message: err instanceof Error ? err.message : String(err),
+      },
+      { status: 502 },
+    );
+  }
+
+  const text = await upstream.text();
+  let payload: unknown;
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    return Response.json(
+      {
+        ok: false,
+        error: "backend_bad_response",
+        status: upstream.status,
+        body: text.slice(0, 2000),
+      },
+      { status: upstream.ok ? 502 : upstream.status },
+    );
+  }
+
+  return Response.json(payload, { status: upstream.status });
+}

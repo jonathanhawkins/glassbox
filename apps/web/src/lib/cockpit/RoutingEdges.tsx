@@ -17,12 +17,19 @@ function center(agent: string) {
   return { x: p.x + LANE_W / 2, y: p.y + LANE_H / 2 };
 }
 
+function top(agent: string) {
+  const p = AGENT_POS[agent];
+  return { x: p.x + LANE_W / 2, y: p.y };
+}
+
 function edge(a: string, b: string) {
   const from = center(a);
   const to = center(b);
   return { from, to };
 }
 
+// Forward flow, left to right: planner -> coordinator -> worker grid ->
+// validator -> improver. These are short straight hops along the pipeline.
 const EDGES: Array<[string, string]> = [
   ["planner", "coordinator"],
   ["coordinator", "worker-1"],
@@ -34,8 +41,20 @@ const EDGES: Array<[string, string]> = [
   ["worker-3", "validator"],
   ["worker-4", "validator"],
   ["validator", "improver"],
-  ["improver", "planner"],
 ];
+
+/**
+ * The self-improvement loop closes from improver back to planner. Drawn as an
+ * arc that lifts above the whole pipeline (rather than a straight line slicing
+ * back through the worker grid) so the feedback reads as a distinct return path.
+ */
+function feedbackPath() {
+  const from = top("improver");
+  const to = top("planner");
+  const lift = 78; // how high above the band the arc bows
+  const cy = Math.min(from.y, to.y) - lift;
+  return `M ${from.x} ${from.y} C ${from.x} ${cy}, ${to.x} ${cy}, ${to.x} ${to.y}`;
+}
 
 export function RoutingEdges() {
   return (
@@ -58,6 +77,15 @@ export function RoutingEdges() {
           <stop offset="100%" stopColor="rgba(167,139,250,0.18)" />
         </linearGradient>
       </defs>
+      {/* The improver -> planner self-improvement loop, arcing over the band. */}
+      <path
+        d={feedbackPath()}
+        fill="none"
+        stroke="rgba(167,139,250,0.22)"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeDasharray="2 9"
+      />
       {EDGES.map(([a, b], i) => {
         const { from, to } = edge(a, b);
         return (

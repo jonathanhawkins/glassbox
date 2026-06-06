@@ -27,12 +27,39 @@ import {
   LANE_W,
   laneCenter,
   type BeadState,
+  type SkillState,
 } from "./types";
 
 const ANIM = { animation: { duration: 520 } } as const;
 const ANIM_FAST = { animation: { duration: 320 } } as const;
 
 type AnimateOpts = { animation: { duration: number } };
+
+/**
+ * Screen-space insets (px) for the floating HTML chrome that overlays the
+ * canvas, so the board fits in the clear center and nothing hides under a dock.
+ * These mirror the overlay geometry in CockpitBoard.tsx: left dock is
+ * `left-5` + `w-[280px]`, right rail is `right-5` + `w-[380px]`, the header
+ * runs along the top, and the docks sit `bottom-5`.
+ */
+const DOCK_INSETS = { left: 316, right: 416, top: 116, bottom: 28 } as const;
+
+/** Breathing room between the docks and the framed board, in screen px. */
+const FRAME_MARGIN = 24;
+
+/**
+ * On small windows the fixed dock insets would consume the whole viewport, so we
+ * never let the insets eat more than this fraction of each axis. The board then
+ * grows to fill whatever is left (sliding partly under the docks if it must)
+ * instead of collapsing into a tiny cluster.
+ */
+const MAX_INSET_FRAC = { x: 0.62, y: 0.5 } as const;
+
+/** Clamp the fitted zoom so the board neither vanishes nor balloons. */
+const MIN_FIT_ZOOM = 0.06;
+const MAX_FIT_ZOOM = 1.5;
+
+const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Round-robin worker pool the coordinator routes to (mirrors agents/coordinator). */
 const WORKER_POOL = ["worker-1", "worker-2", "worker-3", "worker-4"];
@@ -61,6 +88,8 @@ type BeadRecord = {
   label: string;
   backlogSlot: number;
   doneSlot: number;
+  /** The worker lane this bead is currently sitting on, if any. */
+  worker?: string;
 };
 
 export class BoardController {
@@ -71,14 +100,39 @@ export class BoardController {
   private nextBacklogSlot = 0;
   private nextDoneSlot = 0;
   private routeIdx = 0; // fallback round-robin when an event lacks a worker agent
+  private resizeObserver?: ResizeObserver;
+  private reframeTimer?: ReturnType<typeof setTimeout>;
 
   // Callbacks the Cockpit overlay listens to for header readouts.
   onGoal?: (goal: string) => void;
   onPlannerVersion?: (v: number) => void;
   onFinished?: (accuracy: number | null) => void;
+  onSkill?: (state: SkillState) => void;
+
+  // Live planner-skill state derived from the event stream (for the skill strip).
+  private skill: SkillState = {
+    version: 1,
+    covered: [],
+    accuracy: null,
+    lastGap: null,
+    lastAdded: null,
+  };
 
   constructor(editor: Editor) {
     this.editor = editor;
+  }
+
+  /** Push the current skill state to the overlay (copying the covered array). */
+  private publishSkill() {
+    this.onSkill?.({ ...this.skill, covered: [...this.skill.covered] });
+  }
+
+  /** Seed the skill strip from GET /api/skill + the leaderboard on mount. */
+  hydrateSkill(covered: string[], version: number, accuracy: number | null) {
+    this.skill.covered = covered.map(String);
+    if (Number.isFinite(version)) this.skill.version = version;
+    if (accuracy !== null && Number.isFinite(accuracy)) this.skill.accuracy = accuracy;
+    this.publishSkill();
   }
 
   /** Build the static frame: the 8 agent lanes, all idle. Idempotent-ish. */
@@ -109,40 +163,96 @@ export class BoardController {
       },
       { ignoreShapeLock: true },
     );
-    this.frameCamera();
+    this.frameCamera({ immediate: true });
   }
 
   /**
    * Frame the board so the whole scene is visible in the clear center by
    * default, then hand camera control back to the user (wheel to zoom, drag to
-   * pan). We use tldraw camera *constraints* with padding so the fit accounts
-   * for the floating side docks (left controls/legend, right
-   * curve/copilot/ticker) and the top header. This keeps the validator/improver
-   * lanes and the done rail from hiding underneath those panels on load, while
-   * still letting you zoom out to see more.
+   * pan).
+   *
+   * Instead of tldraw's symmetric camera *constraints* (a single padding value
+   * applied to every edge, which over-pads narrow windows into a tiny cluster
+   * and ignores that our left/right docks are different widths), we fit the
+   * board into the actual *clear rectangle*: the viewport minus the asymmetric
+   * dock insets. The insets back off proportionally on small windows so the
+   * board fills the space it has instead of collapsing. We then re-frame on
+   * resize so it stays fitted as the window changes.
    */
-  frameCamera() {
+  frameCamera(opts: { immediate?: boolean } = {}) {
+    // Absolute zoom ladder for wheel / keyboard zoom (whole-board fit usually
+    // lands somewhere in the middle of this range).
     this.editor.setCameraOptions({
       isLocked: false,
       panSpeed: 1,
       zoomSpeed: 1,
-      // zoomSteps are relative to the fit-max base zoom: 1 = whole board fits,
-      // < 1 = zoomed out (smaller, more headroom), > 1 = zoomed in.
-      zoomSteps: [0.2, 0.35, 0.5, 0.7, 1, 1.4, 2, 3],
+      zoomSteps: [MIN_FIT_ZOOM, 0.12, 0.25, 0.4, 0.6, 0.85, 1, 1.5, 2.5, 4],
       wheelBehavior: "zoom",
-      constraints: {
-        bounds: BOARD_BOUNDS,
-        // Screen-space padding: clear the ~400px right rail / ~300px left dock
-        // on x, and the top header on y.
-        padding: { x: 400, y: 110 },
-        origin: { x: 0.5, y: 0.5 },
-        initialZoom: "fit-max",
-        baseZoom: "fit-max",
-        behavior: "contain",
-      },
     });
-    // Apply the initial (fit-max) framing now that constraints are set.
-    this.editor.setCamera(this.editor.getCamera(), { reset: true, immediate: true });
+
+    const clear = this.clearRect();
+    if (!clear) return;
+
+    const board = BOARD_BOUNDS;
+    const z = clampNum(
+      Math.min(clear.w / board.w, clear.h / board.h),
+      MIN_FIT_ZOOM,
+      MAX_FIT_ZOOM,
+    );
+    // Place the board's center at the clear rect's center. tldraw maps a page
+    // point P to screen as (P + camera) * zoom, so camera = target/zoom - P.
+    const x = clear.cx / z - (board.x + board.w / 2);
+    const y = clear.cy / z - (board.y + board.h / 2);
+    this.editor.setCamera(
+      { x, y, z },
+      opts.immediate ? { immediate: true } : { animation: { duration: 280 } },
+    );
+
+    this.watchResize();
+  }
+
+  /**
+   * The viewport rectangle (screen px) that is clear of the floating docks, with
+   * a margin. Dock insets scale down on small windows so the board never gets
+   * squeezed to nothing. Returns null if the viewport is not measured yet.
+   */
+  private clearRect() {
+    const vsb = this.editor.getViewportScreenBounds();
+    if (!vsb || vsb.w < 1 || vsb.h < 1) return null;
+
+    let { left, right, top, bottom } = DOCK_INSETS;
+    const hSum = left + right;
+    const hMax = vsb.w * MAX_INSET_FRAC.x;
+    if (hSum > hMax) {
+      const k = hMax / hSum;
+      left *= k;
+      right *= k;
+    }
+    const vSum = top + bottom;
+    const vMax = vsb.h * MAX_INSET_FRAC.y;
+    if (vSum > vMax) {
+      const k = vMax / vSum;
+      top *= k;
+      bottom *= k;
+    }
+
+    const x = left + FRAME_MARGIN;
+    const y = top + FRAME_MARGIN;
+    const w = Math.max(80, vsb.w - left - right - FRAME_MARGIN * 2);
+    const h = Math.max(80, vsb.h - top - bottom - FRAME_MARGIN * 2);
+    return { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
+  }
+
+  /** Re-fit the board whenever the canvas container resizes (debounced). */
+  private watchResize() {
+    if (this.resizeObserver || typeof ResizeObserver === "undefined") return;
+    const container = this.editor.getContainer();
+    if (!container) return;
+    this.resizeObserver = new ResizeObserver(() => {
+      if (this.reframeTimer) clearTimeout(this.reframeTimer);
+      this.reframeTimer = setTimeout(() => this.frameCamera(), 120);
+    });
+    this.resizeObserver.observe(container);
   }
 
   /** Remove every shape (agents + beads) and reset bookkeeping. */
@@ -167,7 +277,9 @@ export class BoardController {
   }
 
   private donePos(slot: number) {
-    return { x: DONE_RAIL.x, y: DONE_RAIL.y + slot * DONE_RAIL.gapY };
+    const col = slot % DONE_RAIL.cols;
+    const row = Math.floor(slot / DONE_RAIL.cols);
+    return { x: DONE_RAIL.x + col * DONE_RAIL.gapX, y: DONE_RAIL.y + row * DONE_RAIL.gapY };
   }
 
   private setAgentStatus(agent: string, status: string) {
@@ -252,6 +364,23 @@ export class BoardController {
     return rec;
   }
 
+  /** Number of beads already parked on this worker lane (for the stagger). */
+  private workerBeadCount(worker: string): number {
+    let n = 0;
+    for (const rec of this.beadByBeadId.values()) {
+      if (rec.worker === worker) n += 1;
+    }
+    return n;
+  }
+
+  /** Park a bead onto a worker lane, fanning it out if others are already there. */
+  private placeOnWorker(rec: BeadRecord, worker: string, opts: AnimateOpts = ANIM) {
+    rec.worker = worker;
+    const stack = this.workerBeadCount(worker) - 1; // this rec is now counted
+    const c = laneCenter(worker, Math.max(0, stack));
+    this.moveBead(rec, c.x, c.y, opts);
+  }
+
   private resolveWorker(ev: GlassboxEvent): string {
     const agent = ev.agent;
     if (agent && WORKER_POOL.includes(agent)) return agent;
@@ -273,11 +402,20 @@ export class BoardController {
         this.onFinished?.(null);
         // The coordinator wakes immediately to orchestrate the plan.
         this.setAgentStatus("coordinator", "working");
+        // Reset the skill readout for the new run (keep covered until plan_started).
+        if (typeof ev.planner_version === "number") this.skill.version = ev.planner_version;
+        this.skill.accuracy = null;
+        this.skill.lastGap = null;
+        this.publishSkill();
         break;
       }
 
       case "plan_started": {
         this.setAgentStatus("planner", "working");
+        const cov = ev.payload?.covered;
+        if (Array.isArray(cov)) this.skill.covered = cov.map(String);
+        if (typeof ev.planner_version === "number") this.skill.version = ev.planner_version;
+        this.publishSkill();
         break;
       }
 
@@ -285,6 +423,12 @@ export class BoardController {
         const cap = String(ev.payload?.capability ?? "");
         if (ev.bead_id) this.ensureBead(ev.bead_id, cap, ev.title ?? "", "backlog");
         this.setAgentStatus("planner", "working");
+        // A created bead's capability is a category this plan covers (fallback if
+        // plan_started lacked it). harness is structural, not a scoring tile.
+        if (cap && cap !== "harness" && !this.skill.covered.includes(cap)) {
+          this.skill.covered = [...this.skill.covered, cap];
+          this.publishSkill();
+        }
         break;
       }
 
@@ -294,8 +438,7 @@ export class BoardController {
         const rec = this.ensureBead(ev.bead_id, cap, ev.title ?? "", "backlog");
         const worker = this.resolveWorker(ev);
         this.updateBeadState(rec, "claimed");
-        const c = laneCenter(worker);
-        this.moveBead(rec, c.x, c.y, ANIM);
+        this.placeOnWorker(rec, worker, ANIM);
         this.setAgentStatus(worker, "working");
         this.setAgentStatus("coordinator", "working");
         // Settle into working a beat after it lands on the lane.
@@ -313,6 +456,9 @@ export class BoardController {
         const rec = this.ensureBead(ev.bead_id, cap, ev.title ?? "", "working");
         const worker = ev.agent && WORKER_POOL.includes(ev.agent) ? ev.agent : null;
         this.updateBeadState(rec, "done");
+        // It leaves the worker lane, so it no longer counts toward that
+        // worker's stack (the next claim there starts from the card again).
+        rec.worker = undefined;
         // Park it on the validated rail (heading toward the validator).
         if (rec.doneSlot < 0) rec.doneSlot = this.nextDoneSlot++;
         const p = this.donePos(rec.doneSlot);
@@ -332,7 +478,11 @@ export class BoardController {
           if (rec.doneSlot >= 0) this.updateBeadState(rec, "passed");
         }
         this.setAgentStatus("validator", "done");
-        if (acc !== null) this.onFinished?.(acc);
+        if (acc !== null) {
+          this.onFinished?.(acc);
+          this.skill.accuracy = acc;
+          this.publishSkill();
+        }
         break;
       }
 
@@ -345,14 +495,26 @@ export class BoardController {
         const bounceId = `${ev.bead_id ?? "fail"}:retry:${Math.random().toString(36).slice(2, 6)}`;
         const rec = this.ensureBead(bounceId, cap, "retry", "failed");
         this.updateBeadState(rec, "failed");
-        if (acc !== null) this.onFinished?.(acc);
+        if (acc !== null) {
+          this.onFinished?.(acc);
+          this.skill.accuracy = acc;
+        }
+        if (failedCats.length) this.skill.lastGap = { category: failedCats[0], accuracy: acc ?? 0 };
+        this.publishSkill();
         break;
       }
 
       case "plan_gap_found": {
-        // The planner spotted a missing category: drop a glowing injected bead.
+        // The Weave eval flagged a failing category: pulse it on the skill strip.
         this.setAgentStatus("planner", "working");
         this.setAgentStatus("improver", "working");
+        const category = String(ev.payload?.category ?? "");
+        const gacc = numAccuracy(ev);
+        if (category) {
+          this.skill.lastGap = { category, accuracy: gacc ?? this.skill.accuracy ?? 0 };
+          this.skill.lastAdded = null;
+          this.publishSkill();
+        }
         break;
       }
 
@@ -371,6 +533,16 @@ export class BoardController {
         this.setAgentStatus("planner", "working");
         // Improver pulse settles after the rewrite.
         window.setTimeout(() => this.setAgentStatus("improver", "done"), 1400);
+        // The skill grew: light up the newly added category on the strip.
+        const added = ev.payload?.added_category;
+        const rcov = ev.payload?.covered;
+        if (Array.isArray(rcov)) this.skill.covered = rcov.map(String);
+        else if (typeof added === "string" && !this.skill.covered.includes(added))
+          this.skill.covered = [...this.skill.covered, added];
+        this.skill.lastAdded = typeof added === "string" ? added : null;
+        this.skill.lastGap = null;
+        if (typeof ev.planner_version === "number") this.skill.version = ev.planner_version;
+        this.publishSkill();
         break;
       }
 
@@ -380,6 +552,9 @@ export class BoardController {
         this.setAllAgentsDoneSoft();
         if (acc !== null) this.onFinished?.(acc);
         if (typeof ev.planner_version === "number") this.onPlannerVersion?.(ev.planner_version);
+        if (acc !== null) this.skill.accuracy = acc;
+        if (typeof ev.planner_version === "number") this.skill.version = ev.planner_version;
+        this.publishSkill();
         break;
       }
 
@@ -443,8 +618,7 @@ export class BoardController {
         const worker = b.assignee && WORKER_POOL.includes(b.assignee) ? b.assignee : null;
         this.updateBeadState(rec, "working");
         if (worker) {
-          const c = laneCenter(worker);
-          this.moveBead(rec, c.x, c.y, ANIM_FAST);
+          this.placeOnWorker(rec, worker, ANIM_FAST);
           this.setAgentStatus(worker, "working");
         }
       } else if (b.status === "closed") {
@@ -459,6 +633,9 @@ export class BoardController {
   dispose() {
     for (const t of this.workerResetTimers.values()) clearTimeout(t);
     this.workerResetTimers.clear();
+    if (this.reframeTimer) clearTimeout(this.reframeTimer);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = undefined;
   }
 }
 

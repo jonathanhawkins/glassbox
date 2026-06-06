@@ -8,11 +8,11 @@ improver:
      covers) and computes the missing categories (the 7 scoring categories minus
      the covered set, or the validator's ``failed_categories``);
   2. picks the highest-impact missing one by the canonical category order;
-  3. calls the LLM to REWRITE agents/planner/SKILL.md so the coverage block gains
-     that category AND a dated rationale section is appended;
-  4. falls back to a deterministic edit (add the category + a templated rationale)
-     if the LLM is unavailable or returns something that does not parse or does
-     not grow the coverage by EXACTLY the intended category;
+  3. applies a deterministic coverage edit (skill.add_category, a canonical block)
+     and appends a dated rationale section whose prose is LLM-authored;
+  4. falls back to a templated rationale if the LLM is unavailable or its reply
+     looks like leaked prompt or markup (we never ask the model for the whole
+     document, only the rationale sentence, so SKILL.md stays clean);
   5. snapshots the resulting skill to agents/planner/history/v{n+1}.md;
   6. emits ``plan_gap_found`` (payload {category, accuracy}) and
      ``planner_rewrite`` (payload {from_version, to_version, added_category}).
@@ -31,6 +31,7 @@ Interface other pillars build on:
 from __future__ import annotations
 
 import datetime as _dt
+import os
 from typing import Any, Iterable, Optional
 
 from . import _paths
@@ -87,114 +88,87 @@ def _rationale_heading(next_version: int) -> str:
     return f"## Revision v{next_version}"
 
 
-def _rationale_section(
-    next_version: int, from_version: int, category: str, accuracy: float
-) -> str:
-    """A short dated rationale block appended to the skill on each rewrite."""
-    today = _dt.date.today().isoformat()
+def _fallback_rationale(from_version: int, category: str, accuracy: float) -> str:
+    """The deterministic one-line rationale used when the LLM is unavailable."""
     return (
-        f"\n{_rationale_heading(next_version)}: the v{from_version} eval showed "
-        f"{category} inputs failing (accuracy {accuracy:.2f}); add a bead to "
-        f"cover {category}. ({today})\n"
+        f"the v{from_version} eval showed {category} inputs failing "
+        f"(accuracy {accuracy:.2f}), so a bead was added to cover {category}."
     )
 
 
-def _deterministic_rewrite(
-    text: str,
-    next_version: int,
-    from_version: int,
-    category: str,
-    accuracy: float,
-) -> str:
-    """Add ``category`` to the coverage block and append a dated rationale.
-
-    This is the fallback the LLM rewrite is validated against and falls back to.
-    """
-    grown = skill.add_category(text, category)
-    return grown + _rationale_section(next_version, from_version, category, accuracy)
+def _rationale_section(next_version: int, rationale: str) -> str:
+    """Wrap a plain-prose rationale in a clean, dated revision heading."""
+    today = _dt.date.today().isoformat()
+    return f"\n{_rationale_heading(next_version)}: {rationale} ({today})\n"
 
 
-def _llm_rewrite(
-    text: str,
-    next_version: int,
-    from_version: int,
-    category: str,
-    accuracy: float,
+# Phrases that signal the model leaked the prompt or structural markup into its
+# reply. A rationale containing any of these is rejected (we use the fallback),
+# which keeps SKILL.md clean: we only ever insert plain prose.
+_RATIONALE_REJECT = (
+    "coverage:",
+    "<!--",
+    "-->",
+    "## revision",
+    "return the",
+    "rewrite the document",
+    "```",
+    "skill.md",
+    "markers",
+)
+
+
+def _llm_rationale(
+    from_version: int, category: str, accuracy: float
 ) -> Optional[str]:
-    """Ask the LLM to rewrite the skill: add ``category`` + a dated rationale.
+    """Ask the LLM for ONLY a one or two sentence rationale (plain prose).
 
-    Returns the new skill text, or None if the LLM is unavailable or its output
-    does not satisfy the structural checks (coverage block parses and grew by
-    EXACTLY ``category``, and a ``## Revision v{n}`` heading is present). The
-    caller validates again and falls back to the deterministic edit if needed.
+    Returns a sanitized rationale string, or None if the LLM is unavailable or
+    its reply looks like leaked prompt or markup. We never ask the model for the
+    whole document (that caused it to echo the prompt back into SKILL.md); the
+    structural edit is done deterministically by skill.add_category.
     """
-    current = skill.parse_coverage(text)
-    target = sorted(set(current) | {category})
     messages = [
         {
             "role": "system",
             "content": (
-                "You are the Glassbox improver. You edit the planner's skill "
-                "markdown. Return the ENTIRE rewritten markdown document and "
-                "nothing else (no code fences, no commentary)."
+                "You are the Glassbox improver. Reply with ONE or TWO short "
+                "sentences of plain prose explaining the planner skill change. "
+                "No markdown, no headings, no lists, no code, no quotes, no "
+                "document, no markers. Under 240 characters."
             ),
         },
         {
             "role": "user",
             "content": (
-                "Here is the current planner SKILL.md:\n\n"
-                f"{text}\n\n----\n"
-                f"The latest eval (planner v{from_version}) scored accuracy "
-                f"{accuracy:.2f}. The input category '{category}' is failing "
-                "because the plan does not cover it. Rewrite the document so "
-                "that:\n"
-                f"1. the coverage block (between the {skill._START} and "
-                f"{skill._END} markers) lists EXACTLY these categories, one per "
-                f"line: {', '.join(target)}.\n"
-                f"2. you append a new section that begins with the heading "
-                f"'{_rationale_heading(next_version)}:' explaining that the "
-                f"v{from_version} eval showed {category} inputs failing "
-                f"(accuracy {accuracy:.2f}) so a bead is added to cover "
-                f"{category}.\n"
-                "Keep all other content (the human-readable bead descriptions, "
-                "the capability set, the rules). Do not invent categories. "
-                "Return the whole markdown document now."
+                f"The latest planner eval (v{from_version}) scored accuracy "
+                f"{accuracy:.2f}. The input category '{category}' was failing "
+                "because the plan did not cover it, so a bead to cover "
+                f"{category} is being added. Write the one or two sentence "
+                "rationale."
             ),
         },
     ]
+    # Use a standard instruct model for the short rationale. The default swarm
+    # model (gpt-oss-120b) is a reasoning model that returns empty content unless
+    # given a large token budget, so prefer the fast chat model here.
+    model = (
+        os.environ.get("GLASSBOX_RATIONALE_MODEL")
+        or os.environ.get("GLASSBOX_CHAT_MODEL")
+        or "meta-llama/Llama-3.3-70B-Instruct"
+    )
     try:
-        reply = llm.chat(messages, temperature=0.0, max_tokens=4096)
+        reply = llm.chat(messages, model=model, temperature=0.4, max_tokens=200)
     except llm.LLMError as exc:
-        print(f"[improver] LLM unavailable, using deterministic rewrite: {exc}")
+        print(f"[improver] LLM unavailable, using deterministic rationale: {exc}")
         return None
-
-    candidate = reply.strip()
-    # Strip an accidental surrounding code fence if the model added one.
-    if candidate.startswith("```"):
-        lines = candidate.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        candidate = "\n".join(lines).strip()
-
-    # Structural validation: the coverage block must parse and equal the target,
-    # and the dated rationale heading must be present. Anything else -> fallback.
-    try:
-        got = skill.parse_coverage(candidate)
-    except ValueError as exc:
-        print(f"[improver] LLM rewrite had no valid coverage block: {exc}")
+    # Collapse whitespace/newlines into a single clean line.
+    rationale = " ".join(reply.split()).strip().strip('"').strip()
+    low = rationale.lower()
+    if not rationale or len(rationale) > 400 or any(b in low for b in _RATIONALE_REJECT):
+        print("[improver] LLM rationale rejected (empty/too long/leaked); fallback")
         return None
-    if set(got) != set(target):
-        print(
-            "[improver] LLM coverage "
-            f"{got} != target {target}; using deterministic rewrite"
-        )
-        return None
-    if _rationale_heading(next_version) not in candidate:
-        print("[improver] LLM rewrite missing rationale heading; falling back")
-        return None
-    return candidate
+    return rationale
 
 
 @weave.op()
@@ -209,9 +183,9 @@ def improve(
 
     Determines the highest-impact missing category (preferring one that is both
     missing from the SKILL coverage AND present in ``failed_categories``, else the
-    lowest-index missing category overall), rewrites SKILL.md via the LLM (with a
-    deterministic fallback) so the coverage block grows by EXACTLY that category
-    plus a dated rationale, snapshots the result to history/v{n+1}.md, and emits
+    lowest-index missing category overall), grows the coverage block by EXACTLY
+    that category via a deterministic edit, appends an LLM-authored dated rationale
+    (templated fallback), snapshots the result to history/v{n+1}.md, and emits
     ``plan_gap_found`` and ``planner_rewrite``.
 
     If the SKILL already covers every category (no gap), this is a no-op: it
@@ -253,13 +227,15 @@ def improve(
         payload={"category": category, "accuracy": accuracy},
     )
 
-    new_text = _llm_rewrite(text, next_version, planner_version, category, accuracy)
+    # Clean structural edit (deterministic, canonical coverage block) plus an
+    # LLM-authored plain-prose rationale (sanitized), with a templated fallback.
+    grown = skill.add_category(text, category)
+    rationale = _llm_rationale(planner_version, category, accuracy)
     rewrite_source = "llm"
-    if new_text is None:
-        new_text = _deterministic_rewrite(
-            text, next_version, planner_version, category, accuracy
-        )
+    if rationale is None:
+        rationale = _fallback_rationale(planner_version, category, accuracy)
         rewrite_source = "deterministic"
+    new_text = grown + _rationale_section(next_version, rationale)
 
     # Invariant: the coverage block must parse and must have grown by EXACTLY the
     # intended category. Assert hard (a corrupted rewrite must never ship).

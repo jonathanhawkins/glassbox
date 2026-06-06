@@ -90,19 +90,26 @@ export const LANE_H = 96;
 export const BEAD_W = 120;
 export const BEAD_H = 46;
 
-/** Where each agent lane card sits, top-left corner in page space. */
+/**
+ * Where each agent lane card sits, top-left corner in page space.
+ *
+ * The roster reads left-to-right as the live pipeline, mirroring the deck:
+ * planner -> coordinator -> the 2x2 worker grid -> validator -> improver. The
+ * single-lane agents are vertically centered on the worker grid's mid-line so
+ * the whole row scans as one flow.
+ */
 export const AGENT_POS: Record<string, { x: number; y: number }> = {
-  planner: { x: 40, y: 40 },
-  coordinator: { x: 40, y: 168 },
-  "worker-1": { x: 360, y: 40 },
-  "worker-2": { x: 360, y: 168 },
-  "worker-3": { x: 580, y: 40 },
-  "worker-4": { x: 580, y: 168 },
-  validator: { x: 880, y: 40 },
-  improver: { x: 880, y: 168 },
+  planner: { x: 40, y: 96 },
+  coordinator: { x: 290, y: 96 },
+  "worker-1": { x: 540, y: 40 },
+  "worker-2": { x: 744, y: 40 },
+  "worker-3": { x: 540, y: 152 },
+  "worker-4": { x: 744, y: 152 },
+  validator: { x: 994, y: 96 },
+  improver: { x: 1244, y: 96 },
 };
 
-/** The backlog column (left, under the coordinator) where new beads appear. */
+/** The backlog grid (lower-left, under the planner) where new beads appear. */
 export const BACKLOG = {
   x: 40,
   y: 300,
@@ -111,18 +118,63 @@ export const BACKLOG = {
   gapY: BEAD_H + 14,
 };
 
-/** The "validated" rail on the right where done/passed beads settle. */
+/** The "validated" grid (lower-right, under the validator) where done beads settle. */
 export const DONE_RAIL = {
-  x: 880,
+  x: 994,
   y: 300,
+  cols: 2,
+  gapX: BEAD_W + 16,
   gapY: BEAD_H + 12,
 };
 
-/** The whole framed board region (used to lock/zoom the camera). */
-export const BOARD_BOUNDS = { x: 0, y: 0, w: 1100, h: 640 };
+/** The whole framed board region (used to fit/zoom the camera). */
+export const BOARD_BOUNDS = { x: 0, y: 0, w: 1480, h: 580 };
 
-/** Center point of an agent lane, for animating a bead onto it. */
-export function laneCenter(agent: string): { x: number; y: number } {
+/** Diagonal stagger (page px) when more than one bead sits on a worker. */
+export const LANE_STACK = { dx: 10, dy: 9 } as const;
+
+/**
+ * Where a task bead lands when a worker is working it. The bead overlays the
+ * lower body of the worker card (centered horizontally, tucked just under the
+ * agent name + status light, which stay visible along the top) so it reads as
+ * "this task belongs to this worker" instead of floating below the lane.
+ * Multiple beads on the same worker fan out with a small diagonal stagger.
+ */
+export function laneCenter(agent: string, stack = 0): { x: number; y: number } {
   const p = AGENT_POS[agent] ?? AGENT_POS.coordinator;
-  return { x: p.x + LANE_W / 2 - BEAD_W / 2, y: p.y + LANE_H + 8 };
+  return {
+    x: p.x + LANE_W / 2 - BEAD_W / 2 + stack * LANE_STACK.dx,
+    y: p.y + LANE_H - BEAD_H - 10 + stack * LANE_STACK.dy,
+  };
 }
+
+// --- Planner skill evolution (the capability strip) -----------------------
+
+/**
+ * The 7 SCORING categories in canonical climb order (mirrors
+ * agents/skill.py CATEGORY_ORDER). The skill strip lights these up left to right
+ * as the planner skill grows. `harness` is structural and intentionally absent.
+ */
+export const CATEGORY_ORDER: Capability[] = [
+  "ascii",
+  "punctuation",
+  "numbers",
+  "code",
+  "unicode",
+  "whitespace",
+  "emoji",
+];
+
+/**
+ * Live planner-skill state the board derives from the event stream and hands to
+ * the PlannerSkillPanel. `covered` is a subset of CATEGORY_ORDER; `lastGap` is
+ * the category the latest Weave eval flagged; `lastAdded` is the category the
+ * latest improver rewrite added.
+ */
+export type SkillState = {
+  version: number;
+  covered: string[];
+  accuracy: number | null;
+  lastGap: { category: string; accuracy: number } | null;
+  lastAdded: string | null;
+};

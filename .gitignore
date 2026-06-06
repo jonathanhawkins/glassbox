@@ -36,3 +36,6 @@ wandb/
 # misc
 .turbo/
 coverage/
+
+# local Claude Code state (plans, local settings)
+.claude/
