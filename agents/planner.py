@@ -1,9 +1,19 @@
-"""The planner: decompose the goal into the 8-bead capability graph.
+"""The planner: decompose the goal into the capability graph the SKILL covers.
 
-``plan(goal, run_id, planner_version, allowed_caps)`` reads the editable skill at
-agents/planner/SKILL.md, asks the LLM for a JSON array of beads
-(``[{title, capability, deps}]``), and falls back to the deterministic canonical
-plan if the LLM is unavailable. It then:
+The planner's skill file (agents/planner/SKILL.md) is the SOURCE OF TRUTH for
+which input categories the plan covers: it carries a machine-readable coverage
+block (see agents/skill.py) that the planner parses deterministically. The set of
+beads is exactly:
+
+    foundational ``ascii`` + one bead per covered category + structural ``harness``
+
+so the plan grows precisely as the improver rewrites the coverage block. The LLM
+may still be asked to phrase nice bead titles/descriptions from the skill, but the
+SET OF CAPABILITIES never depends on the LLM: it always equals the parsed
+coverage. If the LLM is unavailable or returns a set that does not match the
+coverage, the planner uses canonical titles instead.
+
+``plan(goal, run_id, planner_version, allowed_caps)`` then:
 
   - emits a ``plan_started`` event,
   - creates each bead via beads.create (wiring deps title -> id),
@@ -16,13 +26,13 @@ The capability tag on each bead is the load-bearing convention: it is one of the
 ``harness``). The worker adds a bead's category to the run's accumulated set and
 the validator runs the oracle gated on that set, so an incomplete plan genuinely
 fails a class of inputs and the correctness curve climbs honestly as the improver
-adds the missing category beads.
+adds the missing category beads to the skill.
 
-``allowed_caps`` lets the improver schedule a partial plan: when given, only the
-category beads whose capability is in ``allowed_caps`` are included, but the
-foundational ``ascii`` bead and the structural ``harness`` bead are ALWAYS kept
-(everything depends on ascii; harness is the pipeline). ``allowed_caps=None``
-means the full 8-bead plan.
+``allowed_caps`` lets a caller (climb_loop, the /run endpoint) restrict a plan:
+when given, the category beads are INTERSECTED with it, but the foundational
+``ascii`` bead and the structural ``harness`` bead are ALWAYS kept (everything
+depends on ascii; harness is the pipeline). ``allowed_caps=None`` means "use the
+SKILL coverage as-is".
 """
 from __future__ import annotations
 
@@ -38,89 +48,75 @@ _paths.load_env()
 
 import weave  # noqa: E402
 
-from . import beads, bus, llm  # noqa: E402
-
-SKILL_PATH = Path(__file__).resolve().parent / "planner" / "SKILL.md"
-
-# The 7 scoring categories (contract/CAPABILITIES.md), in coverage order, plus
-# the structural ``harness`` tag (accepted by the oracle but has no scoring
-# effect). ``ascii`` is the foundational category every other one depends on.
-FOUNDATIONAL = "ascii"
-STRUCTURAL = "harness"
-
-# Category coverage order the improver climbs through (ascii first, emoji last).
-CATEGORY_ORDER: list[str] = [
-    "ascii",
-    "punctuation",
-    "numbers",
-    "code",
-    "unicode",
-    "whitespace",
-    "emoji",
-]
+from . import beads, bus, llm, skill  # noqa: E402
+from .skill import (  # noqa: E402
+    CATEGORY_ORDER,
+    FOUNDATIONAL,
+    SKILL_PATH,
+    STRUCTURAL,
+    canonical_title,
+)
 
 # All allowed capability tags the planner/worker/validator agree on.
 CAPABILITIES = set(CATEGORY_ORDER) | {STRUCTURAL}
 
-# Canonical deterministic decomposition: the 8 beads of CAPABILITIES.md. Each
-# category bead makes its class of inputs pass; the structural harness bead wires
-# the pipeline. deps reference other titles in this list. Beads 2-7 depend on
-# bead 1 (ascii); bead 8 (harness) depends on beads 1-7.
-CANONICAL_PLAN: list[dict[str, Any]] = [
-    {
-        "title": "Core BPE and vocab load (plain ASCII text)",
-        "capability": "ascii",
-        "deps": [],
-    },
-    {
-        "title": "Regex pre-tokenization for punctuation and contractions",
-        "capability": "punctuation",
-        "deps": ["Core BPE and vocab load (plain ASCII text)"],
-    },
-    {
-        "title": "Numeric token handling",
-        "capability": "numbers",
-        "deps": ["Core BPE and vocab load (plain ASCII text)"],
-    },
-    {
-        "title": "Source-code token handling",
-        "capability": "code",
-        "deps": ["Core BPE and vocab load (plain ASCII text)"],
-    },
-    {
-        "title": "Byte-level UTF-8 for unicode text",
-        "capability": "unicode",
-        "deps": ["Core BPE and vocab load (plain ASCII text)"],
-    },
-    {
-        "title": "Whitespace and spacing fidelity",
-        "capability": "whitespace",
-        "deps": ["Core BPE and vocab load (plain ASCII text)"],
-    },
-    {
-        "title": "Emoji and multibyte sequences",
-        "capability": "emoji",
-        "deps": ["Core BPE and vocab load (plain ASCII text)"],
-    },
-    {
-        "title": "Encode/decode pipeline and oracle diff harness",
-        "capability": "harness",
-        "deps": [
-            "Core BPE and vocab load (plain ASCII text)",
-            "Regex pre-tokenization for punctuation and contractions",
-            "Numeric token handling",
-            "Source-code token handling",
-            "Byte-level UTF-8 for unicode text",
-            "Whitespace and spacing fidelity",
-            "Emoji and multibyte sequences",
-        ],
-    },
-]
-
 
 def read_skill() -> str:
     """Return the current planner skill text (the editable SKILL.md)."""
-    return SKILL_PATH.read_text(encoding="utf-8")
+    return skill.read_skill(SKILL_PATH)
+
+
+def covered_categories() -> list[str]:
+    """The categories the SKILL coverage block currently covers (ordered).
+
+    Parsed deterministically from SKILL.md (never via the LLM). This is the set
+    the planner turns into category beads.
+    """
+    return skill.covered_categories(SKILL_PATH)
+
+
+def _plan_from_coverage(
+    covered: list[str], allowed_caps: Optional[Iterable[str]] = None
+) -> list[dict[str, Any]]:
+    """Build the deterministic bead spec from the SKILL coverage set.
+
+    The spec is exactly: the foundational ``ascii`` bead, one bead per covered
+    scoring category, and the structural ``harness`` join bead. Every category
+    bead depends on ``ascii``; ``harness`` depends on all the category beads.
+    Titles come from the canonical map so deps (wired by title) always line up.
+
+    ``allowed_caps`` (when given) intersects the covered categories, but ``ascii``
+    and ``harness`` are always kept, so a caller can request a narrower plan
+    without breaking the foundational/join wiring.
+    """
+    cats = [c for c in CATEGORY_ORDER if c in set(covered)]
+    if allowed_caps is not None:
+        allow = set(allowed_caps) | {FOUNDATIONAL, STRUCTURAL}
+        cats = [c for c in cats if c in allow]
+    # ascii is foundational and always present.
+    if FOUNDATIONAL not in cats:
+        cats = [FOUNDATIONAL, *cats]
+
+    ascii_title = canonical_title(FOUNDATIONAL)
+    spec: list[dict[str, Any]] = [
+        {"title": ascii_title, "capability": FOUNDATIONAL, "deps": []}
+    ]
+    middle_titles: list[str] = []
+    for cat in cats:
+        if cat == FOUNDATIONAL:
+            continue
+        title = canonical_title(cat)
+        spec.append({"title": title, "capability": cat, "deps": [ascii_title]})
+        middle_titles.append(title)
+    # The harness join depends on ascii plus every covered category bead.
+    spec.append(
+        {
+            "title": canonical_title(STRUCTURAL),
+            "capability": STRUCTURAL,
+            "deps": [ascii_title, *middle_titles],
+        }
+    )
+    return spec
 
 
 def _extract_json_array(text: str) -> Optional[list[Any]]:
@@ -149,7 +145,8 @@ def _normalize_plan(raw: list[Any]) -> Optional[list[dict[str, Any]]]:
 
     Each item needs a non-empty title and a capability in the allowed set; deps
     must reference titles present in the plan. Returns None if the plan is too
-    malformed to trust (the caller then falls back to CANONICAL_PLAN).
+    malformed to trust (the caller then falls back to canonical titles built from
+    the SKILL coverage).
     """
     cleaned: list[dict[str, Any]] = []
     titles: set[str] = set()
@@ -200,29 +197,20 @@ def _topo_sort(plan: list[dict[str, Any]]) -> Optional[list[dict[str, Any]]]:
     return ordered
 
 
-def _filter_allowed(
-    spec: list[dict[str, Any]], allowed_caps: Optional[Iterable[str]]
-) -> list[dict[str, Any]]:
-    """Restrict a plan to ``allowed_caps`` category beads.
+def _plan_from_llm(
+    goal: str, required_caps: set[str]
+) -> Optional[list[dict[str, Any]]]:
+    """Ask the LLM to phrase the beads for exactly ``required_caps``.
 
-    The foundational ``ascii`` bead and the structural ``harness`` bead are
-    always kept. Any dep pointing at a dropped bead is pruned, and the harness
-    bead's deps are reduced to the beads that remain, so wiring never dangles.
-    ``allowed_caps=None`` returns the spec unchanged (the full plan).
+    The SET of capabilities is NOT up to the LLM: it is the SKILL coverage
+    (foundational ascii + covered categories + harness), passed in as
+    ``required_caps``. The LLM only supplies nice titles/order. We accept its
+    plan only if its capability set EXACTLY equals ``required_caps``; otherwise we
+    return None so the caller uses canonical titles. This keeps the curve a real
+    consequence of the skill, never of LLM whim.
     """
-    if allowed_caps is None:
-        return [dict(b) for b in spec]
-    allow = set(allowed_caps) | {FOUNDATIONAL, STRUCTURAL}
-    kept = [dict(b) for b in spec if b["capability"] in allow]
-    kept_titles = {b["title"] for b in kept}
-    for bead in kept:
-        bead["deps"] = [d for d in bead["deps"] if d in kept_titles]
-    return kept
-
-
-def _plan_from_llm(goal: str) -> Optional[list[dict[str, Any]]]:
-    """Ask the LLM for a bead plan. Returns a normalized plan or None."""
-    skill = read_skill()
+    skill_text = read_skill()
+    caps_line = ", ".join(sorted(required_caps))
     messages = [
         {
             "role": "system",
@@ -235,23 +223,39 @@ def _plan_from_llm(goal: str) -> Optional[list[dict[str, Any]]]:
         {
             "role": "user",
             "content": (
-                f"{skill}\n\n----\nGOAL: {goal}\n\n"
-                "Emit the JSON array of 8 beads now."
+                f"{skill_text}\n\n----\nGOAL: {goal}\n\n"
+                "Emit a JSON array with EXACTLY one bead per capability in this "
+                f"set and NO others: {caps_line}. Each bead is "
+                '{"title","capability","deps"}. Use the capability tags exactly '
+                "as given. The `ascii` bead has no deps; every other category "
+                "bead depends on the `ascii` bead by its title; the `harness` "
+                "bead depends on every category bead by title. Emit the array "
+                "now."
             ),
         },
     ]
     try:
         reply = llm.chat(messages, temperature=0.0, max_tokens=4096)
     except llm.LLMError as exc:
-        print(f"[planner] LLM unavailable, using deterministic plan: {exc}")
+        print(f"[planner] LLM unavailable, using canonical titles: {exc}")
         return None
     raw = _extract_json_array(reply)
     if raw is None:
-        print("[planner] could not parse LLM plan, using deterministic plan")
+        print("[planner] could not parse LLM plan, using canonical titles")
         return None
     normalized = _normalize_plan(raw)
     if normalized is None:
-        print("[planner] LLM plan failed validation, using deterministic plan")
+        print("[planner] LLM plan failed validation, using canonical titles")
+        return None
+    # The capability set is load-bearing: reject any plan that does not cover
+    # EXACTLY the SKILL coverage (the LLM is only allowed to choose phrasing).
+    got = {b["capability"] for b in normalized}
+    if got != required_caps:
+        print(
+            "[planner] LLM caps "
+            f"{sorted(got)} != coverage {sorted(required_caps)}; "
+            "using canonical titles"
+        )
         return None
     return normalized
 
@@ -265,10 +269,16 @@ def plan(
 ) -> list[dict[str, Any]]:
     """Decompose ``goal`` into beads, create them, emit events, return the list.
 
-    When ``allowed_caps`` is given, only category beads whose capability is in
-    that set are created (the foundational ``ascii`` bead and the structural
-    ``harness`` bead are always included). ``allowed_caps=None`` builds the full
-    8-bead plan.
+    The capability SET is taken from the SKILL coverage block (foundational
+    ``ascii`` + one bead per covered category + structural ``harness``), parsed
+    deterministically. When ``allowed_caps`` is given it INTERSECTS the covered
+    categories (``ascii`` and ``harness`` are always kept), so a caller can plan a
+    narrower run. ``allowed_caps=None`` plans exactly the SKILL coverage.
+
+    The LLM is consulted only to phrase titles for that exact capability set; if
+    it is unavailable or proposes a different set, canonical titles are used. So
+    the plan size and categories are a genuine consequence of the skill, not the
+    model.
 
     Returns a list of bead dicts: {id, title, capability, deps (titles),
     dep_ids}. ``id`` is the created bead id; ``dep_ids`` are the bead ids this
@@ -276,15 +286,18 @@ def plan(
     """
     llm.init_weave()
 
-    source = "llm"
-    spec = _plan_from_llm(goal)
-    if spec is None:
-        spec = [dict(b) for b in CANONICAL_PLAN]
-        source = "deterministic"
+    # SKILL coverage is the source of truth for which categories the plan covers.
+    covered = covered_categories()
+    base_spec = _plan_from_coverage(covered, allowed_caps=allowed_caps)
+    required_caps = {b["capability"] for b in base_spec}
 
-    # Apply the improver's category schedule, then re-topo-sort so deps still
-    # precede dependents after any pruning.
-    spec = _filter_allowed(spec, allowed_caps)
+    # Let the LLM phrase the beads, but only for EXACTLY the required cap set.
+    source = "llm"
+    spec = _plan_from_llm(goal, required_caps)
+    if spec is None:
+        spec = base_spec
+        source = "skill-canonical"
+
     ordered = _topo_sort(spec)
     if ordered is not None:
         spec = ordered
@@ -300,6 +313,7 @@ def plan(
             "source": source,
             "bead_count": len(spec),
             "allowed_caps": allowed_list,
+            "covered": covered,
             "capabilities": [b["capability"] for b in spec],
         },
     )

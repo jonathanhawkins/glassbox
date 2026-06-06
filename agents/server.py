@@ -8,8 +8,14 @@ Exposes the swarm to the Next.js cockpit (port 3100):
                          present, else a live beads.ready() fallback)
     POST /run   {goal}      -> start one run_cycle in a background thread,
                                returns {"run_id"} immediately
-    POST /loop  {versions}  -> start a climbing climb_loop in a background thread,
-                               returns {"run_base"} immediately
+    POST /loop  {goal,...}  -> start the GENUINE improve_loop (resets the skill
+                               from baseline and rewrites it each cycle) in a
+                               background thread, returns {"run_base"} immediately
+    POST /live  {goal}      -> start run_cycle_live (plan-gap-found + bead_injected
+                               beat) in a background thread, returns {"run_id"}
+    GET  /skill             -> {"current": SKILL.md text, "covered": [...],
+                               "versions": [{version, path, covered}]} read from
+                               agents/planner/history/
 
 A background poller thread mirrors the bead graph (ready + all) to the Redis key
 ``glassbox:beads`` every ~1.5s so the cockpit can read bead state without each
@@ -39,7 +45,7 @@ from pydantic import BaseModel  # noqa: E402
 
 from contract.events import BEADS_STATE  # noqa: E402
 
-from . import beads, bus  # noqa: E402
+from . import beads, bus, skill  # noqa: E402
 
 # Allowed cockpit origins (frontend dev server on 3100, never 3000).
 ALLOWED_ORIGINS = [
@@ -120,7 +126,16 @@ class RunRequest(BaseModel):
 
 class LoopRequest(BaseModel):
     goal: str = "port the BPE tokenizer to Rust"
-    versions: int = 5
+    # max_versions caps the genuine improve_loop; defaults to the 7 categories
+    # plus one (so v1 baseline can climb to full coverage with headroom).
+    max_versions: int = 8
+    # Accepted for backward compatibility with the old climb_loop request shape.
+    versions: Optional[int] = None
+
+
+class LiveRequest(BaseModel):
+    goal: str = "port the BPE tokenizer to Rust"
+    injections: int = 2
 
 
 def _start_thread(target, *args, name: str) -> None:
@@ -138,13 +153,22 @@ def _run_cycle_bg(goal: str, run_id: str, planner_version: int) -> None:
         print(f"[run] run_cycle({run_id}) failed: {exc}")
 
 
-def _climb_loop_bg(goal: str, run_base: str, versions: int) -> None:
+def _improve_loop_bg(goal: str, run_base: str, max_versions: int) -> None:
     from . import run as run_module
 
     try:
-        run_module.climb_loop(goal, run_base, versions=versions)
+        run_module.improve_loop(goal, run_base, max_versions=max_versions)
     except Exception as exc:  # noqa: BLE001
-        print(f"[run] climb_loop({run_base}) failed: {exc}")
+        print(f"[run] improve_loop({run_base}) failed: {exc}")
+
+
+def _live_bg(goal: str, run_id: str, injections: int) -> None:
+    from . import run as run_module
+
+    try:
+        run_module.run_cycle_live(goal, run_id, injections=injections)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[run] run_cycle_live({run_id}) failed: {exc}")
 
 
 @app.get("/health")
@@ -187,9 +211,49 @@ def post_run(req: RunRequest) -> dict[str, str]:
 
 @app.post("/loop")
 def post_loop(req: LoopRequest) -> dict[str, Any]:
-    """Start a climbing climb_loop in the background; return its run_base now."""
+    """Start the genuine improve_loop in the background; return its run_base now.
+
+    improve_loop resets SKILL.md from the incomplete baseline and rewrites it to
+    cover one more failing category per cycle, so the leaderboard climbs as a real
+    consequence of the skill evolving. The legacy ``versions`` field, if sent, is
+    honored as ``max_versions`` for backward compatibility.
+    """
+    max_versions = req.versions if req.versions is not None else req.max_versions
     run_base = f"loop-{int(time.time() * 1000)}"
     _start_thread(
-        _climb_loop_bg, req.goal, run_base, req.versions, name=f"loop-{run_base}"
+        _improve_loop_bg, req.goal, run_base, max_versions, name=f"loop-{run_base}"
     )
-    return {"run_base": run_base, "versions": req.versions}
+    return {"run_base": run_base, "max_versions": max_versions}
+
+
+@app.post("/live")
+def post_live(req: LiveRequest) -> dict[str, Any]:
+    """Start the live inject-the-gap beat in the background; return its run_id."""
+    run_id = f"live-{int(time.time() * 1000)}"
+    _start_thread(
+        _live_bg, req.goal, run_id, req.injections, name=f"live-{run_id}"
+    )
+    return {"run_id": run_id, "injections": req.injections}
+
+
+@app.get("/skill")
+def get_skill() -> dict[str, Any]:
+    """Return the current planner skill text, its coverage, and the version history.
+
+    ``current`` is the live SKILL.md; ``covered`` is its parsed coverage block;
+    ``versions`` is [{version, path, covered}] read from agents/planner/history/
+    so the cockpit can show the coverage block growing v1 -> vN.
+    """
+    try:
+        current = skill.read_skill()
+    except OSError as exc:
+        current = f"(could not read SKILL.md: {exc})"
+    try:
+        covered = skill.covered_categories()
+    except ValueError:
+        covered = []
+    return {
+        "current": current,
+        "covered": covered,
+        "versions": skill.history(),
+    }

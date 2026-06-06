@@ -15,6 +15,8 @@ Interface other pillars build on:
 """
 from __future__ import annotations
 
+import os
+import time
 from typing import Any
 
 from . import _paths
@@ -26,6 +28,26 @@ import weave  # noqa: E402
 from contract.events import RUN_META_PREFIX  # noqa: E402
 
 from . import beads, bus  # noqa: E402
+
+
+def pace_ms() -> int:
+    """Pace delay (ms) for a watchable board, from env GLASSBOX_PACE_MS.
+
+    Default 0 (the overnight loop runs flat out). The demo sets e.g. 700 so the
+    coordinator -> worker -> done transitions are visibly in flight on the board.
+    Invalid values fall back to 0.
+    """
+    try:
+        return max(0, int(os.environ.get("GLASSBOX_PACE_MS", "0")))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _pace_sleep() -> None:
+    """Sleep the configured pace, if any (no-op when GLASSBOX_PACE_MS is 0)."""
+    ms = pace_ms()
+    if ms > 0:
+        time.sleep(ms / 1000.0)
 
 
 def _caps_key(run_id: str) -> str:
@@ -59,6 +81,10 @@ def run_bead(
 
     if capability:
         bus.get_client().sadd(_caps_key(run_id), capability)
+
+    # Pace the bead in flight so the cockpit can show the chip move (demo only;
+    # 0 in the overnight loop). Sits between bead_claimed -> bead_done.
+    _pace_sleep()
 
     beads.close(bead_id, reason=f"{agent} implemented capability={capability}")
 

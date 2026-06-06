@@ -26,12 +26,6 @@ category at a time) to evolve the plan.
 
 <!-- coverage:start -->
 ascii
-code
-emoji
-numbers
-punctuation
-unicode
-whitespace
 <!-- coverage:end -->
 
 ## How the curve works (read this first)
@@ -126,21 +120,3 @@ category tag and never invent a new one outside the allowed set.
 
 - v1 (baseline): covers only `ascii`. Intentionally incomplete so the eval fails
   the other six scoring categories and the improver has room to climb.
-
-## Revision v2:
-- The v1 evaluation scored accuracy 0.14 and identified failures on the `punctuation` category. To address this, a bead for `punctuation` has been added to the coverage block, enabling the planner to generate a corresponding task.
-
-## Revision v3:
-- The v2 evaluation scored accuracy 0.29 and highlighted failures in the `numbers` category. To close this gap, a bead for `numbers` has been added to the coverage block, allowing the planner to generate a task that handles numeric token handling.
-
-## Revision v4:
-- The v3 evaluation scored accuracy 0.43 and highlighted failures in the `code` category. To close this gap, a bead for `code` has been added to the coverage block, allowing the planner to generate a task that handles source-code token handling.
-
-## Revision v5:
-- The v4 evaluation scored accuracy 0.57 and highlighted failures in the `unicode` category. To close this gap, a bead for `unicode` has been added to the coverage block, allowing the planner to generate a task that handles byte-level UTF-8 for unicode text.
-
-## Revision v6:
-- The v5 evaluation scored accuracy 0.71 and showed that inputs containing whitespace (leading/trailing spaces, tabs, double spaces) were still failing. To address this, a bead for `whitespace` has been added to the coverage block, enabling the planner to generate a task that ensures whitespace and spacing fidelity.
-
-## Revision v7:
-- The v6 evaluation scored accuracy 0.86 and revealed that inputs containing emoji were still failing. To close this remaining gap, a bead for `emoji` has been added to the coverage block, allowing the planner to generate a task that handles emoji and other multibyte sequences.
