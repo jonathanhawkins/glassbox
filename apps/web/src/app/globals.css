@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Glassbox is a dark cockpit at all times. */
+  --background: #060a14;
+  --foreground: #e2e8f0;
 }
 
 @theme inline {
@@ -12,15 +13,49 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* --- Glassbox cockpit ---------------------------------------------------- */
+
+/* Status light pulse for a working agent lane. */
+@keyframes gb-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0.65;
+  }
+}
+
+/* Pop-in for an injected (gap-fill) bead. */
+@keyframes gb-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* The cockpit owns the full viewport; keep the tldraw canvas transparent so the
+   dark cockpit background and overlays show through cleanly. */
+.tl-background {
+  background: transparent !important;
+}
+.tl-container {
+  --color-background: transparent;
+  background: transparent;
 }
