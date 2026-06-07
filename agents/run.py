@@ -361,7 +361,7 @@ def run_cycle_live(
 
         # 2) Inject the missing-category bead (depends on the ascii foundation so
         # the wiring is honest: it only becomes ready once ascii is closed).
-        title = skill.canonical_title(category)
+        title = skill.canonical_title(category, task.skill)
         ascii_id = next(
             (b["id"] for b in plan if b["capability"] == task.skill.foundational), None
         )

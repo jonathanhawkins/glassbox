@@ -125,7 +125,11 @@ _RATIONALE_REJECT = (
 
 
 def _llm_rationale(
-    from_version: int, category: str, accuracy: float, failed: int = 0
+    from_version: int,
+    category: str,
+    accuracy: float,
+    failed: int = 0,
+    unit: str = "category",
 ) -> Optional[str]:
     """Ask the LLM for ONLY a one or two sentence rationale (plain prose).
 
@@ -148,10 +152,9 @@ def _llm_rationale(
             "role": "user",
             "content": (
                 f"The latest planner eval (v{from_version}) scored accuracy "
-                f"{accuracy:.2f}. The input category '{category}' was the biggest "
-                f"failing gap ({failed} lines failing exact match), so a bead to "
-                f"cover {category} is being added. Write the one or two sentence "
-                "rationale."
+                f"{accuracy:.2f}. The {unit} '{category}' was the biggest failing "
+                f"gap ({failed} failing checks), so a bead to cover {category} is "
+                "being added. Write the one or two sentence rationale."
             ),
         },
     ]
@@ -258,7 +261,9 @@ def improve(
     # Clean structural edit (deterministic, canonical coverage block) plus an
     # LLM-authored plain-prose rationale (sanitized), with a templated fallback.
     grown = skill.add_category(text, category, cfg)
-    rationale = _llm_rationale(planner_version, category, accuracy, chosen_failed)
+    rationale = _llm_rationale(
+        planner_version, category, accuracy, chosen_failed, unit=cfg.unit
+    )
     rewrite_source = "llm"
     if rationale is None:
         rationale = _fallback_rationale(planner_version, category, accuracy)
@@ -302,7 +307,7 @@ def improve(
         "planner",
         f"Skill rewrite: +{category} (v{planner_version}->v{next_version})",
         planner_version=next_version,
-        body=f"added a bead for {category}; you now cover {len(covered_after)}/7",
+        body=f"added a bead for {category}; you now cover {len(covered_after)}/{len(cfg.order)}",
         kind="rewrite",
         cap=category,
     )

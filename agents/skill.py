@@ -99,6 +99,9 @@ class SkillConfig:
     skill_path: Path
     baseline_path: Path
     history_dir: Path
+    # What one group IS, for human-facing prose (the improver rationale, mail). The
+    # tokenizer's groups are input "categories"; the kata's are test "modules".
+    unit: str = "category"
 
     def valid(self) -> set[str]:
         """The set of valid scoring groups (the coverage block entries)."""

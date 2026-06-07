@@ -53,6 +53,7 @@ KATA_SKILL = SkillConfig(
     skill_path=SKILL_DIR / "SKILL.md",
     baseline_path=SKILL_DIR / "SKILL.baseline.md",
     history_dir=SKILL_DIR / "history",
+    unit="module",
 )
 
 

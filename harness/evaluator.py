@@ -122,9 +122,18 @@ class OracleDiffEvaluator:
         )
 
 
-def _group_from_classname(classname: str) -> str:
-    """Map a pytest junit classname (e.g. 'tests.test_slug') to a group ('slug')."""
-    last = (classname or "").split(".")[-1]
+def _group_from_classname(name: str) -> str:
+    """Map a pytest junit classname/name to a group.
+
+    e.g. 'tests.test_slug' -> 'slug', 'tests/test_slug.py' -> 'slug'. Robust to path
+    separators and a .py suffix so a collection/import error (which pytest records
+    with an empty classname and the dotted path in `name`) still attributes to its
+    real group rather than an empty bucket.
+    """
+    s = (name or "").replace("/", ".")
+    if s.endswith(".py"):
+        s = s[:-3]
+    last = s.split(".")[-1]
     return last[len("test_"):] if last.startswith("test_") else last
 
 
@@ -192,7 +201,7 @@ class PytestEvaluator:
         passed = total = 0
         for tc in tree.getroot().iter("testcase"):
             total += 1
-            group = _group_from_classname(tc.get("classname", ""))
+            group = _group_from_classname(tc.get("classname") or tc.get("name") or "")
             g = by_group.setdefault(group, {"total": 0, "passed": 0, "failed": 0})
             g["total"] += 1
             node = tc.find("failure")
