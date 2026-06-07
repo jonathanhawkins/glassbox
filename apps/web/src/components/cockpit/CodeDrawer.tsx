@@ -57,7 +57,8 @@ export function CodeDrawer({
 }) {
   const [data, setData] = useState<CodeData>(EMPTY);
   const [idx, setIdx] = useState(0);
-  const [activeFile, setActiveFile] = useState<string>("");
+  // The manually-clicked file tab (null = follow the per-version default below).
+  const [userFile, setUserFile] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Load the workspace code each time the drawer opens (or the task changes while
@@ -81,6 +82,7 @@ export function CodeDrawer({
         };
         setData(next);
         setIdx(versions.length ? versions.length - 1 : 0);
+        setUserFile(null);
         const hasCurrent = Object.values(next.current).some((t) => t && t.trim());
         setError(
           versions.length || hasCurrent
@@ -117,22 +119,19 @@ export function CodeDrawer({
     ? data.edit_targets
     : Object.keys(files);
 
-  // When the version changes, default the open file to the one that changed most vs
-  // the previous version (ties -> first target). For a single-file task this is a
-  // no-op. Manual tab clicks override until the next version change.
-  useEffect(() => {
-    if (editTargets.length <= 1) {
-      setActiveFile(editTargets[0] ?? "");
-      return;
-    }
+  // The default open file for the selected version: the one that changed most vs the
+  // previous version (ties -> first target); single-file tasks just use that file.
+  // Derived during render (not set in an effect); a manual tab click overrides it
+  // until the next version change clears userFile.
+  const defaultFile = useMemo(() => {
+    if (editTargets.length <= 1) return editTargets[0] ?? "";
     let best = editTargets[0];
     let bestN = -1;
     for (const rel of editTargets) {
-      const curText = files[rel] ?? "";
       let added = 0;
       if (prev) {
         const ps = lineSet(prev.files?.[rel] ?? "");
-        for (const l of curText.split("\n")) {
+        for (const l of (files[rel] ?? "").split("\n")) {
           const t = l.trim();
           if (t && !ps.has(t)) added += 1;
         }
@@ -142,14 +141,16 @@ export function CodeDrawer({
         best = rel;
       }
     }
-    setActiveFile(best);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idx, data]);
+    return best;
+  }, [editTargets, files, prev]);
+  const activeFile = userFile ?? defaultFile;
 
-  const go = useCallback(
-    (delta: number) => setIdx((i) => Math.max(0, Math.min(maxIdx, i + delta))),
-    [maxIdx],
-  );
+  // Stepping versions clears the manual file override so the new version re-defaults
+  // to its most-changed file.
+  const go = useCallback((delta: number) => {
+    setIdx((i) => Math.max(0, Math.min(maxIdx, i + delta)));
+    setUserFile(null);
+  }, [maxIdx]);
 
   const curText = files[activeFile] ?? "";
   // Added-line set vs the previous version of the SAME file (membership, not LCS;
@@ -206,7 +207,10 @@ export function CodeDrawer({
               {versions.map((v, i) => (
                 <button
                   key={v.version}
-                  onClick={() => setIdx(i)}
+                  onClick={() => {
+                    setIdx(i);
+                    setUserFile(null);
+                  }}
                   className={`rounded-md px-2 py-1 text-[11px] tabular-nums transition ${
                     i === idx
                       ? "border border-emerald-500/60 bg-emerald-500/15 text-emerald-100"
@@ -238,7 +242,7 @@ export function CodeDrawer({
             {editTargets.map((rel) => (
               <button
                 key={rel}
-                onClick={() => setActiveFile(rel)}
+                onClick={() => setUserFile(rel)}
                 title={rel}
                 className={`rounded-md px-2 py-1 font-mono text-[11px] transition ${
                   rel === activeFile
