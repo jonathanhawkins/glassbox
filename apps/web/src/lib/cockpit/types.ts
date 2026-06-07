@@ -62,10 +62,10 @@ export function capColor(cap: string | undefined): string {
 
 // --- Task-agnostic group palette ------------------------------------------
 // The cockpit now runs more than one task (the tokenizer's 7 input categories,
-// the kata's 4 test modules), and each task hands us its own ordered group list
+// the textkit's 4 test modules), and each task hands us its own ordered group list
 // at runtime via /api/skill?task=. The tokenizer's groups keep their hand-picked
 // neon palette + short labels (CAP_COLORS / CAP_LABELS) so its view is unchanged;
-// any group outside that palette (the kata's slug/wrap/template, or a future
+// any group outside that palette (the textkit's slug/wrap/template, or a future
 // task's groups) gets a STABLE derived color and label, so the strip renders N
 // tiles for whatever task is active without a per-task constant table.
 
@@ -251,7 +251,7 @@ export const CATEGORY_ORDER: Capability[] = [
 /**
  * Live planner-skill state the board derives from the event stream and hands to
  * the PlannerSkillPanel. `order` is the ACTIVE task's ordered group list (the
- * tiles to render: 7 for the tokenizer, 4 for the kata), hydrated per task from
+ * tiles to render: 7 for the tokenizer, 4 for the textkit), hydrated per task from
  * /api/skill?task=; `covered` is the subset of `order` the skill currently
  * covers; `unit` is the task's group noun ("category" or "module") for the
  * narration; `lastGap` is the group the latest Weave eval flagged; `lastAdded` is

@@ -12,7 +12,7 @@ It is TASK-AGNOSTIC: every operation takes a ``SkillConfig`` (the ordered groups
 the foundational and structural tags, the per-group bead titles, and the skill /
 baseline / history paths). The tokenizer's config is the module default
 ``TOKENIZER`` so existing no-arg callers keep working; a second task (e.g. the
-pytest kata) passes its own SkillConfig, and the SAME planner/improver/skill code
+pytest textkit) passes its own SkillConfig, and the SAME planner/improver/skill code
 drives it.
 
 Public interface (planner, improver, run, server call these, all cfg-parameterized
@@ -100,7 +100,7 @@ class SkillConfig:
     baseline_path: Path
     history_dir: Path
     # What one group IS, for human-facing prose (the improver rationale, mail). The
-    # tokenizer's groups are input "categories"; the kata's are test "modules".
+    # tokenizer's groups are input "categories"; the textkit's are test "modules".
     unit: str = "category"
 
     def valid(self) -> set[str]:

@@ -409,7 +409,7 @@ export default function CockpitBoard() {
           <LaunchControls activeTask={activeTask} onTaskChange={setActiveTask} />
         </div>
         <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
-          <Legend />
+          <Legend activeTask={activeTask} />
         </div>
         {/* Compact live event strip fills the remaining rail height. */}
         <div className="pointer-events-auto min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">

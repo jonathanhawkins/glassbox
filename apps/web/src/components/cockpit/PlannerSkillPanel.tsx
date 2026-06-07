@@ -1,7 +1,7 @@
 "use client";
 
 // PLANNER SKILL strip: the self-improvement made visible. One tile per scoring
-// group of the ACTIVE task (the tokenizer's 7 input categories, or the kata's 4
+// group of the ACTIVE task (the tokenizer's 7 input categories, or the textkit's 4
 // test modules), in the task's canonical climb order, lighting up left to right
 // as the planner skill grows. Each still-failing tile shows HOW MANY lines the
 // Weave eval flagged (the real, per-run signal the improver prioritizes on); the
@@ -15,6 +15,7 @@
 import { useState } from "react";
 
 import { groupColor, groupLabel, type SkillState } from "@/lib/cockpit/types";
+import { useTaskGroups } from "@/lib/cockpit/useTaskGroups";
 
 import { SkillViewerDrawer } from "./SkillViewerDrawer";
 
@@ -27,9 +28,12 @@ export function PlannerSkillPanel({
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const covered = new Set(skill.covered);
-  const order = skill.order;
+  // The tile set (order) and group noun (unit) are STATIC per task, sourced keyed
+  // on the active task so they always match it (the live skill.order can race a run
+  // or a remount). Coverage, failing, version, and accuracy still come from the
+  // live skill state below, so the strip keeps climbing in lockstep with the curve.
+  const { order, unit } = useTaskGroups(activeTask);
   const total = order.length;
-  const unit = skill.unit || "category";
   const gap = skill.lastGap?.category ?? null;
   const added = skill.lastAdded;
   const failingMap = new Map(skill.failing.map((f) => [f.category, f.failed]));

@@ -17,7 +17,7 @@ swarm runs any of them. We demonstrate two very different ones:
 - **Python `textkit` library**, graded by its **pytest** suite.
 
 The same planner/coordinator/worker/validator/improver climbs both (tokenizer
-~0.17 to 1.00, kata 0.52 to 1.00), with zero swarm code changed between tasks.
+~0.17 to 1.00, textkit 0.52 to 1.00), with zero swarm code changed between tasks.
 
 Built at WeaveHacks 4 (W&B SF). Weave project:
 https://wandb.ai/whitely-white-elk-llc/glassbox/weave
@@ -34,7 +34,7 @@ https://wandb.ai/whitely-white-elk-llc/glassbox/weave
   and keeps it only if the score genuinely improves; otherwise it falls back to a
   vetted reference (logged honestly). The score flows from the real built artifact.
 - **It generalizes.** The swarm is task-agnostic; the evaluator is pluggable
-  (`harness/evaluator.py`). The tokenizer and the kata are two configured tasks, and
+  (`harness/evaluator.py`). The tokenizer and the textkit are two configured tasks, and
   the same loop improves both. Generality is bounded only by the evaluator: any task
   with an executable test suite or a reference to diff.
 - **Genuine self-improvement.** The improver reads which groups failed in the real
@@ -71,7 +71,7 @@ Per-task planner-version scores -> Redis sorted sets -> the climbing curve
 
 - `apps/web/` cockpit (tldraw board + CopilotKit), port 3100
 - `agents/` swarm (planner, coordinator, workers, validator, improver) + FastAPI, port 8100
-- `tasks/` the pluggable tasks: `tokenizer/` (Rust) and `kata/` (Python), each a
+- `tasks/` the pluggable tasks: `tokenizer/` (Rust) and `textkit/` (Python), each a
   `{goal, workspace, evaluator, skill}` package
 - `harness/` the checkable evaluators (the tiktoken oracle + the pytest runner) and fixtures
 - `contract/` the integration seam (events + Redis keys + ports)
@@ -87,13 +87,13 @@ GLASSBOX_PACE_MS=600 pnpm backend          # swarm + server :8100 (paced for the
 pnpm web                                   # cockpit :3100
 ```
 
-Open `http://localhost:3100`. Pick a task (tokenizer or kata) in the command bar, then
+Open `http://localhost:3100`. Pick a task (tokenizer or textkit) in the command bar, then
 Launch run (single full plan), Run climb (the genuine self-improvement loop), or Run
 live (the spot-a-gap inject beat). Workers author with the model by default; set
 `GLASSBOX_WORKER_LLM=0` for the fast, fully reliable deterministic path on a live board.
 
 From the CLI: `uv run python -m agents.run "<goal>" <run-base> <versions> <task>`
-(e.g. `... "build textkit" kata 6 kata`).
+(e.g. `... "build textkit" textkit 6 textkit`).
 
 Ports 3100 and 8100 are deliberate (3000/8000 are reserved on this machine).
 

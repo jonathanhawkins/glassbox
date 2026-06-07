@@ -43,7 +43,7 @@ validator builds it and diffs the token IDs against tiktoken. No gating, no hard
 number." Click "Run live (inject)": the planner spots a missing group, injects a bead
 live, and the accuracy jumps.
 
-**1:10 to 1:55 (generality, the kata).** Switch the task to "kata" and Launch. "Same
+**1:10 to 1:55 (generality, the textkit).** Switch the task to "textkit" and Launch. "Same
 swarm, zero code changed, a completely different problem: a Python library graded by
 pytest." The board animates the same way; the curve climbs as the workers write
 modules and pytest passes more tests (0.52 to 1.00). Line: "the target is a prop. The
@@ -77,7 +77,7 @@ Each maps to POST /api/run, /api/loop, /api/live with the selected task.
   traces watched for tampering. There is no gating: an incomplete tokenizer genuinely
   fails inputs, so the number is never masked.
 - Generality: a task is `{goal, workspace, checkable evaluator}`. We ship two
-  (tokenizer via exact oracle, kata via pytest) and the same swarm runs both. The
+  (tokenizer via exact oracle, textkit via pytest) and the same swarm runs both. The
   honest limit is the evaluator: any task with tests or a reference to diff.
 - Reused versus built: fresh repo this weekend. Beads (`br`), Agent Mail, tldraw,
   CopilotKit, recharts, tiktoken, and pytest are third-party; the swarm, the Task +

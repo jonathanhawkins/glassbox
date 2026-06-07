@@ -6,7 +6,7 @@
 // spot-a-gap inject beat. A small goal input retargets the swarm without code.
 //
 // The TASK switcher picks which target the swarm builds: "tokenizer" (the Rust
-// BPE port, graded by an exact oracle) or "kata" (a Python textkit library,
+// BPE port, graded by an exact oracle) or "textkit" (a Python textkit library,
 // graded by pytest). The selected task is owned by the cockpit and threaded into
 // every launch body (the /api routes forward it), so a run, climb, live inject,
 // or reset all target the active task.
@@ -19,7 +19,7 @@ type Kind = "run" | "loop" | "live" | "reset";
 
 const TASKS: { id: TaskName; label: string }[] = [
   { id: "tokenizer", label: "tokenizer" },
-  { id: "kata", label: "kata" },
+  { id: "textkit", label: "textkit" },
 ];
 
 export function LaunchControls({

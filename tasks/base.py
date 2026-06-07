@@ -46,7 +46,7 @@ class Task:
     edit_targets: list[str] = field(default_factory=list)
     # Optional per-group target file (group -> path relative to workspace). When set,
     # the worker edits the group's file for a bead; otherwise it edits
-    # edit_targets[0]. The tokenizer uses one file for all groups; the kata uses one
+    # edit_targets[0]. The tokenizer uses one file for all groups; the textkit uses one
     # module per group.
     group_targets: dict[str, str] = field(default_factory=dict)
     build_cmd: Optional[list[str]] = None

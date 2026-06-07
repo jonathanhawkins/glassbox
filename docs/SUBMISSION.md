@@ -47,7 +47,7 @@ or a reference to diff, and the same swarm improves it.
 - **The self-improvement loop (built this weekend):** the improver reads which groups
   failed in the real eval and rewrites the planner skill to add the missing bead, so
   the skill materially evolves on disk and the score climbs as a real consequence
-  (tokenizer ~0.17 to 1.00, kata 0.52 to 1.00).
+  (tokenizer ~0.17 to 1.00, textkit 0.52 to 1.00).
 - **The cockpit (built this weekend):** Next.js 15/16 + tldraw custom shapes, driven
   entirely by the Redis event stream over SSE, with a per-task recharts correctness
   curve, a task switcher, and a CopilotKit command bar.
@@ -106,5 +106,5 @@ pnpm backend           # swarm + AG-UI server :8100
 pnpm web               # cockpit :3100  (open http://localhost:3100)
 ```
 
-Pick a task (tokenizer or kata) in the cockpit, then Launch run / Run climb / Run
+Pick a task (tokenizer or textkit) in the cockpit, then Launch run / Run climb / Run
 live. Ports 3100 (web) and 8100 (backend) are deliberate (3000/8000 are reserved).

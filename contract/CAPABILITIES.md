@@ -2,7 +2,7 @@
 
 This is the shared contract for the **tokenizer task** between the tokenizer
 (tokenizer-rs), the planner (agents/planner), and the validator (agents/validator +
-harness). It is one task's group taxonomy: the kata task defines its own groups (its
+harness). It is one task's group taxonomy: the textkit task defines its own groups (its
 pytest modules). The goal: an incomplete tokenizer genuinely fails a class of inputs,
 so the oracle (exact token-ID match against tiktoken gpt2, on the real built binary)
 returns an intermediate accuracy, and the correctness curve climbs honestly as the

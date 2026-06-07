@@ -4,7 +4,7 @@
 // 1.5s and plots accuracy (0..1) against planner version, climbing left to right
 // as the improver closes capability gaps. recharts AreaChart with a neon stroke.
 // The active task is threaded in so the curve reflects whichever target the
-// operator is running (the tokenizer and the kata keep separate per-task curves).
+// operator is running (the tokenizer and the textkit keep separate per-task curves).
 
 import { useEffect, useMemo, useState } from "react";
 import {

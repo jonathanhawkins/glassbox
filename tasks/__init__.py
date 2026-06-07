@@ -1,7 +1,7 @@
 """Task registry: ``load_task(name)`` returns a configured Task.
 
 Imports are lazy (per task) so loading the tokenizer task does not pull in the
-kata task's pytest dependency, and vice versa.
+textkit task's pytest dependency, and vice versa.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ DEFAULT_TASK = "tokenizer"
 
 def available_tasks() -> list[str]:
     """The task names load_task understands."""
-    return ["tokenizer", "kata"]
+    return ["tokenizer", "textkit"]
 
 
 def load_task(name: str | None = None) -> Task:
@@ -22,8 +22,8 @@ def load_task(name: str | None = None) -> Task:
         from .tokenizer import build_task
 
         return build_task()
-    if key == "kata":
-        from .kata import build_task
+    if key == "textkit":
+        from .textkit import build_task
 
         return build_task()
     raise ValueError(f"unknown task {name!r} (available: {available_tasks()})")

@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
  * { current, covered, order, unit, versions: [{version, covered, text}] }.
  *
  * Proxies the backend GET /skill?task=, which reads the requested task's skill on
- * demand (so the kata and the tokenizer each return their own groups + history),
+ * demand (so the textkit and the tokenizer each return their own groups + history),
  * rather than the single tokenizer-only Redis mirror.
  */
 export async function GET(request: Request) {

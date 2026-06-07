@@ -162,7 +162,7 @@ def set_planner_score(version: int, accuracy: float, task: str = "tokenizer") ->
     """ZADD the planner version's accuracy onto the task's leaderboard sorted set.
 
     member = str(version), score = accuracy (0..1), key = per-task (so the tokenizer
-    and the kata keep separate curves). Drives the climbing correctness curve and
+    and the textkit keep separate curves). Drives the climbing correctness curve and
     the leaderboard in the cockpit. Returns accuracy.
     """
     get_client().zadd(planner_scores_key(task), {str(version): float(accuracy)})

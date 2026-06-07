@@ -1,35 +1,33 @@
 "use client";
 
-// Capability color legend. Mirrors lib/cockpit/types CAP_COLORS so the bead
-// colors on the board are readable at a glance.
+// Color legend for the ACTIVE task's scoring groups. Mirrors the PLANNER SKILL
+// strip: the group list comes from the active task (useTaskGroups) and the colors
+// and labels from the task-agnostic groupColor/groupLabel, so the legend is the
+// live color key for whichever task is running (the tokenizer's categories or the
+// textkit's modules), matching the bead colors on the board.
 
-import { CAP_COLORS, CAP_LABELS, type Capability } from "@/lib/cockpit/types";
+import { groupColor, groupLabel } from "@/lib/cockpit/types";
+import type { TaskName } from "@/lib/cockpit/tasks";
+import { useTaskGroups } from "@/lib/cockpit/useTaskGroups";
 
-const ORDER: Capability[] = [
-  "ascii",
-  "punctuation",
-  "numbers",
-  "code",
-  "unicode",
-  "emoji",
-  "whitespace",
-  "harness",
-];
-
-export function Legend() {
+export function Legend({ activeTask }: { activeTask: TaskName }) {
+  const { order } = useTaskGroups(activeTask);
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      {ORDER.map((cap) => (
-        <span key={cap} className="flex items-center gap-1.5">
-          <span
-            className="inline-block h-2.5 w-2.5 rounded-full"
-            style={{ background: CAP_COLORS[cap], boxShadow: `0 0 6px ${CAP_COLORS[cap]}` }}
-          />
-          <span className="text-[10px] tracking-wide text-slate-400">
-            {CAP_LABELS[cap]}
+      {order.map((group) => {
+        const color = groupColor(group);
+        return (
+          <span key={group} className="flex items-center gap-1.5">
+            <span
+              className="inline-block h-2.5 w-2.5 rounded-full"
+              style={{ background: color, boxShadow: `0 0 6px ${color}` }}
+            />
+            <span className="text-[10px] tracking-wide text-slate-400">
+              {groupLabel(group)}
+            </span>
           </span>
-        </span>
-      ))}
+        );
+      })}
     </div>
   );
 }

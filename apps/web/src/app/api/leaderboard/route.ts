@@ -13,7 +13,7 @@ type LeaderboardRow = { version: number; accuracy: number };
  *
  * Reads the per-task glassbox:planner_scores:{task} sorted set where member =
  * planner_version (as a string) and score = accuracy, so the tokenizer and the
- * kata keep separate curves. ZRANGE WITHSCORES returns a flat [member, score, ...]
+ * textkit keep separate curves. ZRANGE WITHSCORES returns a flat [member, score, ...]
  * list ordered by score; we reshape and sort by version for a stable climb curve.
  */
 export async function GET(request: Request) {

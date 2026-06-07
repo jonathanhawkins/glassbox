@@ -1,4 +1,4 @@
-# textkit kata: planner skill
+# textkit: planner skill
 
 Build the `textkit` string library so its pytest suite passes. Decompose into one
 bead per module (slug, wrap, numbers, template) plus a structural "suite" bead that

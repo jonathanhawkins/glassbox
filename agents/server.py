@@ -144,7 +144,7 @@ def _poll_loop() -> None:
 
     The planner skill is no longer mirrored here: the cockpit reads it per task on
     demand via GET /skill?task=, so a single tokenizer-only mirror would be wrong
-    for the kata and has no reader.
+    for the textkit and has no reader.
     """
     client = bus.get_client()
     while not _poll_stop.is_set():

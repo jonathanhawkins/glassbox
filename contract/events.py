@@ -32,7 +32,7 @@ DEFAULT_TASK = "tokenizer"
 def planner_scores_key(task: str = DEFAULT_TASK) -> str:
     """The per-task leaderboard sorted-set key.
 
-    Each task keeps its own correctness curve (so the tokenizer and the kata never
+    Each task keeps its own correctness curve (so the tokenizer and the textkit never
     overwrite each other's version scores). Mirrors the TS side, which reads
     ``${REDIS.plannerScores}:${task}``.
     """

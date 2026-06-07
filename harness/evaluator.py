@@ -23,7 +23,7 @@ group next, exactly as before, so the loop is evaluator-agnostic.
 Interface other pillars build on:
     Evaluator.evaluate(workspace, *, seed=None) -> EvalResult
     OracleDiffEvaluator(bin_path, fixtures)     the tokenizer's exact-match oracle
-    PytestEvaluator(...)                         (added with the kata task)
+    PytestEvaluator(...)                         (added with the textkit task)
 """
 from __future__ import annotations
 

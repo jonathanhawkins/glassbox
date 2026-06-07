@@ -1,4 +1,4 @@
-"""The kata task: implement the textkit string library so its pytest suite passes.
+"""The textkit task: implement the textkit string library so its pytest suite passes.
 
 A second, deliberately-different task the SAME swarm runs, to prove generality: the
 evaluator is pytest (not a token-id oracle), the workspace is a multi-module Python
@@ -39,7 +39,7 @@ GOAL = (
     "first, then cover the module whose tests fail most."
 )
 
-KATA_SKILL = SkillConfig(
+TEXTKIT_SKILL = SkillConfig(
     order=GROUPS,
     foundational=FOUNDATIONAL,
     structural="suite",
@@ -84,9 +84,9 @@ def _restore() -> None:
 
 
 def build_task() -> Task:
-    """Build the configured kata Task."""
+    """Build the configured textkit Task."""
     return Task(
-        name="kata",
+        name="textkit",
         goal=GOAL,
         workspace=WORKSPACE,
         evaluator=PytestEvaluator(),
@@ -95,7 +95,7 @@ def build_task() -> Task:
         build_cmd=None,  # pure Python, no build step
         build_cwd=WORKSPACE,
         groups=GROUPS,
-        skill=KATA_SKILL,
+        skill=TEXTKIT_SKILL,
         reset_fn=_reset,
         apply_groups_fn=_apply,
         restore_fn=_restore,
