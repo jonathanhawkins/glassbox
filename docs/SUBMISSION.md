@@ -1,6 +1,6 @@
 # Glassbox submission
 
-**Weave project:** https://wandb.ai/white-elk-llc/glassbox/weave
+**Weave project:** https://wandb.ai/whitely-white-elk-llc/glassbox/weave
 
 ## Summary (2 to 3 sentences)
 

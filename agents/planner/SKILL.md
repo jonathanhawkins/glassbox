@@ -125,10 +125,10 @@ category tag and never invent a new one outside the allowed set.
 - v1 (baseline): covers only `ascii`. Intentionally incomplete so the eval fails
   the other six scoring categories and the improver has room to climb.
 
-## Revision v2: The planner skill is being updated to improve accuracy by adding a bead to cover punctuation. This change targets the largest failing gap in the previous evaluation. (2026-06-06)
+## Revision v2: The planner skill is being updated to improve accuracy with unicode characters. A new bead is being added to address the 19 failing checks in this category. (2026-06-07)
 
-## Revision v3: The planner is being updated to improve its accuracy with numbers. A new bead is being added to address the 31 failing checks in the numbers category. (2026-06-06)
+## Revision v3: The planner skill is being updated to improve accuracy with numbers. A new bead is being added to address this weakness. (2026-06-07)
 
-## Revision v4: The planner skill is being updated to improve accuracy with unicode characters. A new bead is being added to address the 31 failing unicode checks. (2026-06-06)
+## Revision v4: The planner skill is being updated to improve accuracy by addressing whitespace handling. A new bead is being added to cover whitespace. (2026-06-07)
 
-## Revision v5: The planner skill is being updated to improve accuracy by addressing whitespace handling. A new bead is being added to cover this gap. (2026-06-06)
+## Revision v5: The planner skill is being updated to include punctuation handling to address a significant failing gap. This change aims to improve overall accuracy by covering 31 failing checks in the punctuation category. (2026-06-07)

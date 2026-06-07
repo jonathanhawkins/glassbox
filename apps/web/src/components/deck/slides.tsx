@@ -32,7 +32,7 @@ export type Slide = {
   render: () => ReactNode;
 };
 
-const WEAVE_LINK = "https://wandb.ai/white-elk-llc/glassbox/weave";
+const WEAVE_LINK = "https://wandb.ai/whitely-white-elk-llc/glassbox/weave";
 
 // The seven scoring categories (contract/CAPABILITIES.md), in plan order, with
 // the cockpit's per-capability neon palette so the deck matches the board.
@@ -781,7 +781,7 @@ export const SLIDES: Slide[] = [
                   w&b weave project
                 </div>
                 <div className="mt-1 break-all font-mono text-base text-slate-200">
-                  wandb.ai/white-elk-llc/glassbox/weave
+                  wandb.ai/whitely-white-elk-llc/glassbox/weave
                 </div>
               </div>
               <span className="ml-4 font-mono text-3xl text-amber-300 transition group-hover:translate-x-1">
