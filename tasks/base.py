@@ -83,6 +83,9 @@ class Task:
             self.restore_fn()
         elif self.apply_groups_fn is not None and self.groups:
             self.apply_groups_fn(set(self.groups))
+        # Rebuild so the artifact matches the restored (complete) source, not the
+        # partial binary the run left behind.
+        self.build()
 
     def apply_groups(self, groups) -> None:
         """Deterministically make the workspace genuinely satisfy ``groups``.

@@ -97,13 +97,21 @@ class OracleDiffEvaluator:
         if self.fixtures is not None:
             kwargs["fixtures"] = self.fixtures
         res = run_oracle(**kwargs)
+        # Normalize each failure to a uniform "group" key (the oracle reports
+        # "category") so consumers (worker prompts, cockpit) are evaluator-agnostic.
+        failures = []
+        for f in res.get("failed_examples", []):
+            g = dict(f)
+            if "group" not in g and "category" in g:
+                g["group"] = g["category"]
+            failures.append(g)
         return EvalResult(
             score=float(res.get("accuracy", 0.0)),
             passed=int(res.get("passed", 0)),
             total=int(res.get("total", 0)),
             pass_at_1=float(res.get("pass_at_1", res.get("accuracy", 0.0))),
             wall_ms=int(res.get("wall_ms", 0)),
-            failures=list(res.get("failed_examples", [])),
+            failures=failures,
             by_group=dict(res.get("by_category", {})),
             error=str(res.get("error", "")),
         )

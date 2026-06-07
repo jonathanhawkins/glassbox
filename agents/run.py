@@ -61,6 +61,7 @@ _MAX_PASSES = 32
 
 
 def _drain_graph(
+    task: Any,
     run_id: str,
     planner_version: int,
     cap_by_id: dict[str, str],
@@ -103,20 +104,20 @@ def _drain_graph(
             # Nothing claimable even though ready() was non-empty: avoid a spin.
             break
 
-        # Stage the wave: record every claimed bead's category up front. The
-        # workers are already lit (assign_ready), so the whole wave is now in
-        # flight together.
+        # Tag the claimed wave (the workers are already lit by assign_ready).
         for a in assignments:
             a["capability"] = a.get("capability") or cap_by_id.get(a["bead_id"], "")
-            worker.accumulate(run_id, a["capability"])
 
-        # One shared beat: all claimed workers stay lit side by side (demo only).
+        # One shared beat so the lit workers read as a wave on the board (demo only).
         worker._pace_sleep()
 
-        # Finish the wave together: every bead closes and emits bead_done at the
-        # end of the same beat, so the chips fly to the validated rail as a group.
+        # Implement the wave bead by bead. Each worker genuinely authors the source
+        # for its bead (LLM with a deterministic fallback) and closes it; the edits
+        # serialize on the shared workspace, so the source grows incrementally and
+        # the board shows each feature land.
         for a in assignments:
             worker.complete_bead(
+                task,
                 run_id,
                 a["bead_id"],
                 a["capability"],
@@ -170,7 +171,7 @@ def run_cycle(
     # Map bead id -> capability so the worker gets the right category to record.
     cap_by_id = {b["id"]: b["capability"] for b in plan}
 
-    worked = _drain_graph(run_id, planner_version, cap_by_id)
+    worked = _drain_graph(task, run_id, planner_version, cap_by_id)
 
     result = validator.validate(task, run_id, planner_version=planner_version)
     accuracy = float(result.get("accuracy", 0.0))
@@ -237,11 +238,9 @@ def improve_loop(
     weave_url = _weave_url()
 
     # Always start from the incomplete baseline so there is real room to climb,
-    # regardless of what a previous session left on disk: reset BOTH the planner
-    # skill AND the task workspace source to their incomplete baselines.
+    # regardless of what a previous session left on disk.
     skill.reset_to_baseline()
     skill.snapshot(1)
-    task.reset_workspace()
 
     base = run_base if run_base and run_base != "auto" else _auto_base("improve")
     cap = max(1, int(max_versions))
@@ -250,6 +249,11 @@ def improve_loop(
     for n in range(1, cap + 1):
         run_id = f"{base}-v{n}"
         covered_before = planner.covered_categories()
+        # Each version builds its plan FRESH from the baseline source, so the genuine
+        # per-bead authoring is coherent (no carry-over from the previous version's
+        # source) and the version's score reflects exactly the skill's current
+        # coverage. The skill (the planner's strategy) is what persists and grows.
+        task.reset_workspace()
         summary = run_cycle(task, goal, run_id, planner_version=n)
         task.snapshot_workspace(n)
         accuracy = float(summary["accuracy"])
@@ -329,7 +333,7 @@ def run_cycle_live(
         goal, run_id, planner_version, allowed_caps=start_caps
     )
     cap_by_id = {b["id"]: b["capability"] for b in plan}
-    _drain_graph(run_id, planner_version, cap_by_id)
+    _drain_graph(task, run_id, planner_version, cap_by_id)
 
     before = float(
         validator.validate(task, run_id, planner_version=planner_version).get(
@@ -382,6 +386,7 @@ def run_cycle_live(
         # 3) A worker implements the injected bead (accumulates the capability).
         coordinator.assign_ready(run_id, planner_version=planner_version)
         worker.run_bead(
+            task,
             run_id,
             bead_id,
             category,

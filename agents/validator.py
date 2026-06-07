@@ -14,7 +14,6 @@ Interface other pillars build on:
 """
 from __future__ import annotations
 
-import hashlib
 from typing import Any, Iterable, Optional
 
 from . import _paths
@@ -116,19 +115,17 @@ def validate(
     # (harness) are dropped: they have no scoring effect.
     scoring_caps = sorted(caps & _SCORING_CATEGORIES)
 
-    # Genuine grading: realize the covered set into the real workspace source,
-    # build it, and grade the rebuilt artifact with the task's checkable evaluator.
-    # Accuracy is a real consequence of the source (no gating): for the tokenizer,
-    # apply_groups rewrites src/pretok.rs for `scoring_caps`, build runs cargo, and
-    # evaluate runs the exact-match oracle over the corpus. Zero covered categories
-    # therefore yields a real low score, not a sentinel.
-    task.apply_groups(scoring_caps)
+    # Genuine grading: the workers have already authored the workspace source for
+    # this run (LLM with deterministic fallback), so the validator just builds and
+    # grades the real artifact they produced. Accuracy is a real consequence of the
+    # code the agents wrote (no gating): build runs cargo, evaluate runs the
+    # exact-match oracle over the corpus.
     build_ok, build_err = task.build()
-    # Seed the per-run eval sample from the run id, so each run grades a different
-    # held-out batch and the per-category failure magnitudes vary run to run.
-    seed = int(hashlib.sha1(run_id.encode("utf-8")).hexdigest()[:8], 16)
+    # Grade the FULL corpus (deterministic) so the leaderboard climbs monotonically
+    # as real coverage grows; the by_group breakdown over the same corpus is the
+    # signal the improver steers on.
     if build_ok:
-        result = task.evaluate(seed=seed)
+        result = task.evaluate()
     else:
         result = EvalResult(
             score=0.0, passed=0, total=0, error=f"build failed: {build_err[:200]}"
