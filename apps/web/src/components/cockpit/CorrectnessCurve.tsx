@@ -18,11 +18,13 @@ import {
 } from "recharts";
 
 import type { TaskName } from "@/lib/cockpit/tasks";
+import { CollapseButton } from "./CollapseButton";
 
 type LeaderboardRow = { version: number; accuracy: number };
 
 export function CorrectnessCurve({ activeTask }: { activeTask: TaskName }) {
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
+  const [open, setOpen] = useState(true);
   // Reset the rows during render when the task switches, so the previous task's
   // curve never lingers while the first poll for the new task is in flight. This
   // render-phase reset (the React-recommended "adjust state on prop change"
@@ -67,11 +69,14 @@ export function CorrectnessCurve({ activeTask }: { activeTask: TaskName }) {
   const latest = data.length ? data[data.length - 1].accuracy : null;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
-          correctness curve
-        </span>
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <CollapseButton open={open} onClick={() => setOpen((o) => !o)} label="curve" />
+          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+            correctness curve
+          </span>
+        </div>
         <span className="flex items-baseline gap-2 tabular-nums">
           {latest !== null && (
             <span className="text-[11px] font-medium text-cyan-300">
@@ -83,7 +88,7 @@ export function CorrectnessCurve({ activeTask }: { activeTask: TaskName }) {
           </span>
         </span>
       </div>
-      <div className="-mb-1 min-h-0 flex-1">
+      <div className={`-mb-1 mt-1 h-[150px] ${open ? "" : "hidden"}`}>
         {data.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-slate-600">
             waiting for the first graded run

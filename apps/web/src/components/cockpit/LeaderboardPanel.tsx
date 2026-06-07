@@ -7,10 +7,11 @@
 // + ordering, merged with the per-version metadata hash), so the rows and their Weave
 // links survive a page reload, e.g. a pre-baked overnight climb shown on a fresh load.
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { useLeaderboard } from "@/lib/cockpit/useLeaderboard";
 import type { TaskName } from "@/lib/cockpit/tasks";
+import { CollapseButton } from "./CollapseButton";
 
 const STATUS_DOT: Record<string, string> = {
   passed: "bg-emerald-400",
@@ -30,6 +31,7 @@ function weaveProjectRoot(urls: (string | null | undefined)[]): string | null {
 
 export function LeaderboardPanel({ activeTask }: { activeTask: TaskName }) {
   const { rows, loaded } = useLeaderboard(true, activeTask);
+  const [open, setOpen] = useState(true);
 
   const sorted = useMemo(
     () => rows.slice().sort((a, b) => a.version - b.version),
@@ -51,11 +53,14 @@ export function LeaderboardPanel({ activeTask }: { activeTask: TaskName }) {
   );
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="mb-1 flex items-baseline justify-between gap-2">
-        <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
-          leaderboard
-        </span>
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <CollapseButton open={open} onClick={() => setOpen((o) => !o)} label="leaderboard" />
+          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+            leaderboard
+          </span>
+        </div>
         {evalsHref && sorted.length > 0 && (
           <a
             href={evalsHref}
@@ -68,12 +73,12 @@ export function LeaderboardPanel({ activeTask }: { activeTask: TaskName }) {
         )}
       </div>
 
-      {sorted.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-xs text-slate-600">
+      {!open ? null : sorted.length === 0 ? (
+        <div className="mt-1 flex items-center justify-center py-4 text-xs text-slate-600">
           {loaded ? "waiting for the first graded run" : "loading leaderboard..."}
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="mt-1 max-h-[200px] overflow-y-auto pr-1">
           <ul className="flex flex-col gap-1">
             {sorted.map((r) => {
               const acc = Math.max(0, Math.min(1, r.accuracy));

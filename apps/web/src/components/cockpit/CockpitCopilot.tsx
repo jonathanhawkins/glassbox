@@ -69,14 +69,18 @@ function MissionContext() {
 function Suggestions() {
   // The first chip follows the active task's goal (Port the BPE tokenizer to Rust /
   // Build the textkit Python library); the rest are task-agnostic (approve a step,
-  // draw the curve, draw the climb matrix). Re-configured on task switch via the
-  // [task] dep.
+  // draw the curve, draw the climb matrix, draw the leaderboard). Re-configured on
+  // task switch via the [task] dep.
   const task = useActiveTask();
   const goal = defaultGoalFor(task);
   const goalTitle = goal.charAt(0).toUpperCase() + goal.slice(1);
+  // `always`: keep the chips visible before AND after every message, so once the
+  // copilot renders one artifact the operator can jump straight to the next view
+  // (curve -> matrix -> leaderboard) without typing. They double as a standing tour
+  // of what the copilot can do during a live demo.
   useConfigureSuggestions(
     {
-      available: "before-first-message",
+      available: "always",
       suggestions: [
         { title: goalTitle, message: goal },
         {
@@ -90,6 +94,10 @@ function Suggestions() {
         {
           title: "Show the climb matrix",
           message: "Show the climb matrix",
+        },
+        {
+          title: "Show the leaderboard",
+          message: "Show the leaderboard",
         },
       ],
     },

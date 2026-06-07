@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultGoalFor, type TaskName } from "@/lib/cockpit/tasks";
 import { useTasks } from "@/lib/cockpit/useTasks";
 import { NewTaskDialog } from "./NewTaskDialog";
+import { CollapseButton } from "./CollapseButton";
 
 type Kind = "run" | "loop" | "live" | "reset";
 
@@ -33,6 +34,7 @@ export function LaunchControls({
   );
   const DEFAULT_GOAL = defaultGoalFor(activeTask, activeMeta);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [goal, setGoal] = useState(DEFAULT_GOAL);
   const [busy, setBusy] = useState<null | Kind>(null);
   const [note, setNote] = useState<string>("");
@@ -135,94 +137,106 @@ export function LaunchControls({
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Active-task switch: which target the swarm builds and grades. */}
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
-          task
+        <CollapseButton open={open} onClick={() => setOpen((o) => !o)} label="controls" />
+        <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+          controls
         </span>
-        <div
-          role="tablist"
-          aria-label="active task"
-          className="flex flex-1 rounded-lg border border-slate-700/70 bg-slate-900/60 p-0.5"
-        >
-          {tasks.map((t) => {
-            const active = t.id === activeTask;
-            const byo = t.kind === "byo";
-            return (
-              <button
-                key={t.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => switchTask(t.id)}
-                disabled={busy !== null}
-                title={byo && t.repo ? t.repo : undefined}
-                className={`flex-1 truncate rounded-md px-2 py-1 text-[11px] font-medium transition disabled:opacity-50 ${
-                  active
-                    ? byo
-                      ? "bg-amber-500/15 text-amber-200 shadow-[0_0_8px] shadow-amber-500/20"
-                      : "bg-cyan-500/15 text-cyan-200 shadow-[0_0_8px] shadow-cyan-500/20"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                {t.label ?? t.id}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => setNewTaskOpen(true)}
-            disabled={busy !== null}
-            title="Bring your own repo"
-            className="rounded-md px-2 py-1 text-[11px] font-semibold text-amber-300/80 transition hover:text-amber-200 disabled:opacity-50"
-          >
-            + repo
-          </button>
-        </div>
       </div>
+
+      {open && (
+        <>
+          {/* Active-task switch: which target the swarm builds and grades. */}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
+              task
+            </span>
+            <div
+              role="tablist"
+              aria-label="active task"
+              className="flex flex-1 rounded-lg border border-slate-700/70 bg-slate-900/60 p-0.5"
+            >
+              {tasks.map((t) => {
+                const active = t.id === activeTask;
+                const byo = t.kind === "byo";
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => switchTask(t.id)}
+                    disabled={busy !== null}
+                    title={byo && t.repo ? t.repo : undefined}
+                    className={`flex-1 truncate rounded-md px-2 py-1 text-[11px] font-medium transition disabled:opacity-50 ${
+                      active
+                        ? byo
+                          ? "bg-amber-500/15 text-amber-200 shadow-[0_0_8px] shadow-amber-500/20"
+                          : "bg-cyan-500/15 text-cyan-200 shadow-[0_0_8px] shadow-cyan-500/20"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {t.label ?? t.id}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setNewTaskOpen(true)}
+                disabled={busy !== null}
+                title="Bring your own repo"
+                className="rounded-md px-2 py-1 text-[11px] font-semibold text-amber-300/80 transition hover:text-amber-200 disabled:opacity-50"
+              >
+                + repo
+              </button>
+            </div>
+          </div>
+          <input
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            spellCheck={false}
+            className="w-full rounded-lg border border-slate-700/70 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-500/60"
+            placeholder="goal"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={launchRun}
+              disabled={busy !== null}
+              className="flex-1 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:opacity-50"
+            >
+              {busy === "run" ? "Launching..." : "Launch run"}
+            </button>
+            <button
+              onClick={runClimb}
+              disabled={busy !== null}
+              className="flex-1 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-200 transition hover:bg-fuchsia-500/20 disabled:opacity-50"
+            >
+              {busy === "loop" ? "Climbing..." : "Run climb"}
+            </button>
+          </div>
+          <button
+            onClick={runLive}
+            disabled={busy !== null}
+            className="w-full rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:opacity-50"
+          >
+            {busy === "live" ? "Injecting..." : "Run live (inject)"}
+          </button>
+          <button
+            onClick={resetBoard}
+            disabled={busy !== null}
+            className="w-full rounded-lg border border-slate-700/60 bg-slate-900/50 px-3 py-1.5 text-[11px] font-medium text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200 disabled:opacity-50"
+          >
+            {busy === "reset" ? "Resetting..." : "Reset board"}
+          </button>
+          {note && <span className="truncate text-[10px] text-slate-500">{note}</span>}
+        </>
+      )}
+
       <NewTaskDialog
         open={newTaskOpen}
         onClose={() => setNewTaskOpen(false)}
         onTaskChange={onTaskChange}
       />
-      <input
-        value={goal}
-        onChange={(e) => setGoal(e.target.value)}
-        spellCheck={false}
-        className="w-full rounded-lg border border-slate-700/70 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-500/60"
-        placeholder="goal"
-      />
-      <div className="flex gap-2">
-        <button
-          onClick={launchRun}
-          disabled={busy !== null}
-          className="flex-1 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:opacity-50"
-        >
-          {busy === "run" ? "Launching..." : "Launch run"}
-        </button>
-        <button
-          onClick={runClimb}
-          disabled={busy !== null}
-          className="flex-1 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-200 transition hover:bg-fuchsia-500/20 disabled:opacity-50"
-        >
-          {busy === "loop" ? "Climbing..." : "Run climb"}
-        </button>
-      </div>
-      <button
-        onClick={runLive}
-        disabled={busy !== null}
-        className="w-full rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:opacity-50"
-      >
-        {busy === "live" ? "Injecting..." : "Run live (inject)"}
-      </button>
-      <button
-        onClick={resetBoard}
-        disabled={busy !== null}
-        className="w-full rounded-lg border border-slate-700/60 bg-slate-900/50 px-3 py-1.5 text-[11px] font-medium text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200 disabled:opacity-50"
-      >
-        {busy === "reset" ? "Resetting..." : "Reset board"}
-      </button>
-      {note && <span className="truncate text-[10px] text-slate-500">{note}</span>}
     </div>
   );
 }

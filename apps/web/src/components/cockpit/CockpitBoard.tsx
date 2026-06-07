@@ -426,24 +426,26 @@ export default function CockpitBoard() {
         )}
       </aside>
 
-      {/* Right rail: the money-shot curve up top, the operator controls + legend
-          (the chat's manual fallback), and the live event strip filling the rest. */}
+      {/* Right rail: operator controls on top, then the money-shot curve and the
+          leaderboard, the live event strip filling the rest, and the color legend
+          pinned at the foot. Each panel above the feed minimizes to its header so
+          the event feed always has room. */}
       <aside className="pointer-events-none absolute bottom-5 right-5 top-28 z-20 flex w-[360px] flex-col gap-3">
-        <div className="pointer-events-auto h-[200px] shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
-          <CorrectnessCurve activeTask={activeTask} />
-        </div>
-        <div className="pointer-events-auto max-h-[240px] shrink-0 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
-          <LeaderboardPanel activeTask={activeTask} />
-        </div>
         <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
           <LaunchControls activeTask={activeTask} onTaskChange={setActiveTask} />
         </div>
         <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
-          <Legend activeTask={activeTask} />
+          <CorrectnessCurve activeTask={activeTask} />
+        </div>
+        <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
+          <LeaderboardPanel activeTask={activeTask} />
         </div>
         {/* Compact live event strip fills the remaining rail height. */}
         <div className="pointer-events-auto min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
           <EventsTicker events={events} />
+        </div>
+        <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
+          <Legend activeTask={activeTask} />
         </div>
       </aside>
 
