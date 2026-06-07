@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { CAP_COLORS } from "@/lib/cockpit/types";
 import { DeckCurve } from "./DeckCurve";
+import { SponsorStrip } from "./SponsorLogos";
 import {
   ACCENTS,
   type AccentName,
@@ -22,6 +23,7 @@ import {
   Pill,
   SlideShell,
   Stat,
+  Takeaway,
   Title,
 } from "./primitives";
 
@@ -143,6 +145,36 @@ function Point({
   );
 }
 
+/** A compact card for the three judging beats. */
+function JudgeCard({
+  n,
+  title,
+  body,
+  accent = "cyan",
+}: {
+  n: string;
+  title: string;
+  body: ReactNode;
+  accent?: AccentName;
+}) {
+  const a = ACCENTS[accent];
+  return (
+    <Panel accent={accent} className="p-5">
+      <div className="mb-3 flex items-center gap-3">
+        <span
+          className={`flex h-8 w-8 items-center justify-center rounded-lg border ${a.border} ${a.bg} font-mono text-sm ${a.text}`}
+        >
+          {n}
+        </span>
+        <span className={`font-mono text-sm uppercase tracking-[0.16em] ${a.text}`}>
+          {title}
+        </span>
+      </div>
+      <p className="text-base leading-relaxed text-slate-300">{body}</p>
+    </Panel>
+  );
+}
+
 // --- slides ----------------------------------------------------------------
 
 export const SLIDES: Slide[] = [
@@ -162,26 +194,40 @@ export const SLIDES: Slide[] = [
             live . WeaveHacks 4
           </div>
 
-          <h1 className="text-[7rem] font-semibold leading-none tracking-tight text-slate-50">
+          <h1 className="text-[6.5rem] font-semibold leading-none tracking-tight text-slate-50">
             Glassbox
           </h1>
 
-          <p className="mt-8 max-w-4xl text-balance text-3xl leading-snug text-slate-200">
+          <p className="mt-7 max-w-4xl text-balance text-2xl leading-snug text-slate-200">
             Agent swarms are black boxes. Glassbox is the glass cockpit that lets
             you watch a self-improving swarm build real code, graded live against
             ground truth.
           </p>
 
-          <div className="mt-10 flex flex-wrap items-center gap-2.5">
-            <Pill accent="violet">Agent Mail</Pill>
-            <Pill accent="violet">Beads</Pill>
-            <Pill accent="cyan">Weave</Pill>
-            <Pill accent="rose">Redis</Pill>
-            <Pill accent="emerald">CopilotKit</Pill>
-            <Pill accent="amber">tldraw</Pill>
+          <div className="mt-8 grid w-full gap-3 md:grid-cols-3">
+            <JudgeCard
+              n="1"
+              title="watch it"
+              accent="cyan"
+              body="Beads move from planner to workers to validator on a live board."
+            />
+            <JudgeCard
+              n="2"
+              title="score it"
+              accent="emerald"
+              body="The validator builds real code and compares it to a hard oracle."
+            />
+            <JudgeCard
+              n="3"
+              title="improve it"
+              accent="violet"
+              body="The improver rewrites the planner skill, then the curve climbs."
+            />
           </div>
 
-          <p className="mt-10 font-mono text-sm tracking-wide text-slate-500">
+          <SponsorStrip align="left" className="mt-10" />
+
+          <p className="mt-8 font-mono text-sm tracking-wide text-slate-500">
             press <span className="text-cyan-300">{"->"}</span> to advance
           </p>
         </div>
@@ -197,12 +243,12 @@ export const SLIDES: Slide[] = [
     render: () => (
       <SlideShell accent="rose">
         <Eyebrow accent="rose">the problem</Eyebrow>
-        <Title>Orchestration today is a wall of tmux panes.</Title>
+        <Title>Orchestration today hides the answers judges care about.</Title>
         <div className="mt-8 grid gap-8 md:grid-cols-[1.1fr_1fr] md:items-center">
           <Lede>
-            You spin up a swarm and stare at scrolling logs. Nobody, not even the
-            operator, can see whether the swarm is actually adding value, or just
-            burning tokens.
+            You spin up a swarm and stare at scrolling logs. The hard questions
+            stay buried: who did the work, did quality improve, and was it
+            measured against truth?
           </Lede>
 
           {/* A visual nod: a grid of dim, unreadable panes. */}
@@ -228,6 +274,10 @@ export const SLIDES: Slide[] = [
             </p>
           </Panel>
         </div>
+        <Takeaway accent="rose">
+          Glassbox turns the hidden orchestration loop into a visible, measured
+          system judges can inspect in three minutes.
+        </Takeaway>
       </SlideShell>
     ),
   },
@@ -251,8 +301,8 @@ export const SLIDES: Slide[] = [
             </div>
             <p className="text-xl leading-relaxed text-slate-300">
               <span className="text-violet-300">Glassbox</span> is a general
-              self-improvement harness. You point it at any agent swarm and watch
-              it get better at the job, live.
+              self-improvement harness. The demo shows the complete loop:
+              decompose work, run workers, grade truth, rewrite the planner.
             </p>
           </Panel>
           <Panel accent="cyan" className="p-6">
@@ -269,54 +319,82 @@ export const SLIDES: Slide[] = [
         <p className="mt-8 text-pretty text-xl leading-relaxed text-slate-300">
           Glassbox is{" "}
           <span className="text-slate-100">not a tokenizer tool</span>. It is the
-          machine we have run for months, pointed at a target small enough to
-          finish and prove in a weekend.
+          orchestration cockpit and evaluator loop, pointed at a target small
+          enough to finish and prove in a weekend, then{" "}
+          <span className="text-amber-300">at any repo you hand it</span> (more on
+          that later).
         </p>
+        <Takeaway accent="cyan">
+          The tokenizer is the scoreboard. The product is the glass cockpit over
+          a self-improving swarm.
+        </Takeaway>
       </SlideShell>
     ),
   },
 
-  // 4. What a tokenizer actually does (the normie-proof explainer)
+  // 4. What it builds + why it is gradeable (the normie-proof explainer + oracle)
   {
     id: "tokenizer-101",
     title: "What it builds",
     accent: "cyan",
     render: () => (
       <SlideShell accent="cyan">
-        <Eyebrow accent="cyan">in plain english</Eyebrow>
-        <Title>A tokenizer chops text into the numbers an AI reads.</Title>
+        <Eyebrow accent="cyan">the target, and why</Eyebrow>
+        <Title>A tokenizer, because the answer is exact.</Title>
 
         <Lede>
-          Models never see letters. They see token IDs. The tokenizer is the
-          translator, and there is exactly one right answer for every sentence.
+          Models never see letters, they see token IDs. There is exactly one right
+          answer per sentence, so a nice demo cannot bluff the score.
         </Lede>
 
-        <Panel accent="cyan" className="mt-9 p-7">
-          <div className="mb-5 text-center font-mono text-2xl text-slate-100">
+        <Panel accent="cyan" className="mt-6 p-6">
+          <div className="mb-3 text-center font-mono text-xl text-slate-100">
             She said, &quot;It&apos;s a beautiful day, isn&apos;t it?&quot;
           </div>
-
-          <div className="mb-2 flex justify-center">
-            <span className="font-mono text-2xl text-slate-600">{"|"}</span>
+          <div className="mb-4 text-center font-mono text-[11px] uppercase tracking-[0.2em] text-cyan-300/70">
+            gpt2 byte-pair encoding {"->"}
           </div>
-          <div className="mb-5 text-center font-mono text-xs uppercase tracking-[0.2em] text-cyan-300/70">
-            gpt2 byte-pair encoding
-          </div>
-
           <div className="flex flex-wrap items-start justify-center gap-2.5">
             {SAMPLE_TOKENS.map((tok, i) => (
               <TokenChip key={i} t={tok.t} id={tok.id} punct={tok.punct} />
             ))}
           </div>
+          <p className="mt-4 text-center text-sm text-slate-400">
+            The space rides with the word, <Mono accent="violet">&apos;t</Mono> and{" "}
+            <Mono accent="violet">?&quot;</Mono> are their own tokens. One wrong ID
+            fails the line.
+          </p>
         </Panel>
 
-        <p className="mt-7 text-pretty text-lg text-slate-400">
-          Notice the pieces are weird: the space rides with the word,{" "}
-          <Mono accent="violet">&apos;t</Mono> and{" "}
-          <Mono accent="violet">?&quot;</Mono> are their own tokens. Get a single
-          ID wrong and the whole line fails. That is what makes it the perfect,
-          un-gameable scorecard.
-        </p>
+        <div className="mt-6 grid gap-6 md:grid-cols-[1fr_1.15fr] md:items-center">
+          <div className="flex flex-wrap gap-8">
+            <Stat value="217 / 217" label="corpus lines exact" accent="emerald" />
+            <Stat value="100%" label="vs tiktoken gpt2" accent="emerald" />
+          </div>
+          <div className="flex flex-wrap gap-2.5">
+            {CATEGORIES.map(({ cap, label }) => (
+              <span
+                key={cap}
+                className="flex items-center gap-2 rounded-lg border border-slate-800/80 bg-slate-900/40 px-2.5 py-1.5"
+              >
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{
+                    background: CAP_COLORS[cap],
+                    boxShadow: `0 0 8px ${CAP_COLORS[cap]}`,
+                  }}
+                />
+                <span className="font-mono text-sm text-slate-200">{label}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <Takeaway accent="emerald">
+          An exact token-ID diff against tiktoken, scored per category. An
+          incomplete plan honestly fails the classes it skips, so the score comes
+          from the built artifact, not the planner&apos;s say-so.
+        </Takeaway>
       </SlideShell>
     ),
   },
@@ -329,7 +407,7 @@ export const SLIDES: Slide[] = [
     render: () => (
       <SlideShell accent="violet">
         <Eyebrow accent="violet">the swarm + coordination</Eyebrow>
-        <Title>Eight agents, coordinating in the open.</Title>
+        <Title>Planner, coordinator, four workers, validator, improver.</Title>
 
         <div className="mt-9 flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -352,11 +430,12 @@ export const SLIDES: Slide[] = [
           <div className="grid gap-4 md:grid-cols-2">
             <Panel className="p-5">
               <div className="mb-1 font-mono text-sm uppercase tracking-[0.18em] text-slate-400">
-                <Mono accent="violet">Agent Mail</Mono> + <Mono accent="cyan">Beads</Mono>
+                <Mono accent="violet">handoffs</Mono> + <Mono accent="cyan">Beads</Mono>
               </div>
               <p className="text-lg leading-relaxed text-slate-300">
-                Agents message and lease files over Agent Mail. Work lives in
-                Beads, the <Mono>br</Mono> dependency-aware issue graph.
+                The cockpit shows every handoff as an Agent Mail style thread.
+                Work lives in Beads, the <Mono>br</Mono> dependency-aware issue
+                graph.
               </p>
             </Panel>
             <Panel className="p-5">
@@ -371,68 +450,10 @@ export const SLIDES: Slide[] = [
             </Panel>
           </div>
         </div>
-      </SlideShell>
-    ),
-  },
-
-  // 5. Ground truth
-  {
-    id: "ground-truth",
-    title: "Ground truth",
-    accent: "emerald",
-    render: () => (
-      <SlideShell accent="emerald">
-        <Eyebrow accent="emerald">ground truth</Eyebrow>
-        <Title>Why a tokenizer: the answer is exact.</Title>
-
-        <div className="mt-8 grid gap-8 md:grid-cols-[1fr_1.05fr] md:items-start">
-          <div className="flex flex-col gap-6">
-            <Lede>
-              The oracle is an exact token-ID diff against{" "}
-              <Mono accent="emerald">tiktoken gpt2</Mono>. You cannot bluff it. The
-              Rust port reproduces it{" "}
-              <span className="text-emerald-300">byte for byte</span>, using
-              fancy-regex (the same engine tiktoken uses) over the real gpt2
-              merge ranks.
-            </Lede>
-            <div className="flex flex-wrap gap-10">
-              <Stat value="217 / 217" label="corpus lines exact" accent="emerald" />
-              <Stat value="100%" label="match vs tiktoken" accent="emerald" />
-              <Stat value="11" label="rust tests pass" accent="emerald" />
-            </div>
-          </div>
-
-          {/* The 7 scoring categories, colored to the board palette. */}
-          <Panel accent="emerald" className="p-6">
-            <div className="mb-4 font-mono text-sm uppercase tracking-[0.18em] text-slate-400">
-              7 input categories, scored independently
-            </div>
-            <div className="grid grid-cols-2 gap-2.5">
-              {CATEGORIES.map(({ cap, label }) => (
-                <div
-                  key={cap}
-                  className="flex items-center gap-2.5 rounded-lg border border-slate-800/80 bg-slate-900/40 px-3 py-2"
-                >
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{
-                      background: CAP_COLORS[cap],
-                      boxShadow: `0 0 8px ${CAP_COLORS[cap]}`,
-                    }}
-                  />
-                  <span className="font-mono text-base text-slate-200">
-                    {label}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <p className="mt-4 text-base leading-relaxed text-slate-400">
-              An incomplete plan genuinely fails the classes it does not cover, so
-              the oracle returns an honest intermediate accuracy. Nothing is
-              staged.
-            </p>
-          </Panel>
-        </div>
+        <Takeaway accent="violet">
+          On the board, look for the dependency graph: once the foundation bead
+          closes, parallel worker lanes light up together.
+        </Takeaway>
       </SlideShell>
     ),
   },
@@ -440,12 +461,12 @@ export const SLIDES: Slide[] = [
   // 6. Weave grades it
   {
     id: "weave",
-    title: "Weave grades it",
+    title: "Weave traces it",
     accent: "amber",
     render: () => (
       <SlideShell accent="amber">
         <Eyebrow accent="amber">w&b weave</Eyebrow>
-        <Title>Weave is not just logging. It grades.</Title>
+        <Title>Weave shows the run. The oracle supplies the truth.</Title>
 
         <div className="mt-8 grid gap-8 md:grid-cols-[1fr_1fr] md:items-start">
           <ul className="flex flex-col gap-4">
@@ -455,12 +476,12 @@ export const SLIDES: Slide[] = [
               nested session.
             </Point>
             <Point accent="amber">
-              A Weave <span className="text-amber-300">Evaluation</span> scored by
-              the oracle (exact token-ID match, pass@1).
+              The validator records exact-match accuracy, pass@1, wall time, and
+              failing groups from the oracle.
             </Point>
             <Point accent="amber">
-              The W&B MCP server is wired in for inspecting runs, traces, and
-              evals.
+              The improver uses those Weave-traced results to rewrite the
+              planner skill for the next version.
             </Point>
           </ul>
 
@@ -475,7 +496,7 @@ export const SLIDES: Slide[] = [
                 { d: 1, t: "coordinator.route", c: "text-cyan-300" },
                 { d: 2, t: "worker.implement x4", c: "text-slate-300" },
                 { d: 1, t: "validator.oracle_diff", c: "text-emerald-300" },
-                { d: 2, t: "Evaluation: accuracy", c: "text-emerald-300" },
+                { d: 2, t: "score: accuracy, pass@1", c: "text-emerald-300" },
                 { d: 1, t: "improver.rewrite_skill", c: "text-rose-300" },
               ].map((row, i) => (
                 <div
@@ -496,6 +517,10 @@ export const SLIDES: Slide[] = [
           <span className="text-amber-300">which sub-agent moved correctness</span>{" "}
           and whether a plan passed cleanly or thrashed.
         </p>
+        <Takeaway accent="amber">
+          Weave makes the agent loop inspectable. The oracle makes the score
+          trustworthy.
+        </Takeaway>
       </SlideShell>
     ),
   },
@@ -513,10 +538,10 @@ export const SLIDES: Slide[] = [
         <div className="mt-7 grid gap-7 md:grid-cols-[1fr_1.1fr] md:items-stretch">
           <div className="flex flex-col gap-5">
             <Lede>
-              The improver reads which categories failed in the Weave eval and
-              rewrites <Mono accent="cyan">agents/planner/SKILL.md</Mono> to add
-              the missing-category bead. The LLM authors a dated rationale citing
-              the prior accuracy.
+              The improver reads which categories failed in the validator&apos;s
+              Weave-traced oracle result and rewrites{" "}
+              <Mono accent="cyan">agents/planner/SKILL.md</Mono> to add the
+              missing-category bead.
             </Lede>
             <ul className="flex flex-col gap-3">
               <Point accent="cyan">
@@ -526,8 +551,8 @@ export const SLIDES: Slide[] = [
               </Point>
               <Point accent="cyan">
                 Each version adds one category, so accuracy steps{" "}
-                <span className="text-cyan-300">+1/7</span> every time. Honest, not
-                hard-coded.
+                <span className="text-cyan-300">+1/7</span> every time. Honest,
+                not staged.
               </Point>
             </ul>
             <div className="flex flex-wrap gap-8">
@@ -541,58 +566,83 @@ export const SLIDES: Slide[] = [
             <DeckCurve />
           </Panel>
         </div>
+        <Takeaway accent="cyan">
+          This is the self-improvement claim: the planner changes on disk, then
+          the next run creates a better bead graph.
+        </Takeaway>
       </SlideShell>
     ),
   },
 
-  // 8. Spot a gap, inject a bead
+  // 7b. It generalizes: bring your own repo
   {
-    id: "inject",
-    title: "Spot a gap, inject a bead",
-    accent: "violet",
+    id: "byo",
+    title: "Point it at any repo",
+    accent: "amber",
     render: () => (
-      <SlideShell accent="violet">
-        <Eyebrow accent="violet">live, on the board</Eyebrow>
-        <Title>Spot a gap, inject a bead, watch it jump.</Title>
+      <SlideShell accent="amber">
+        <Eyebrow accent="amber">it generalizes</Eyebrow>
+        <Title>Same swarm. Now point it at any repo.</Title>
 
         <Lede>
-          Mid-run the swarm detects a missing capability, injects a bead into the
-          graph live, and the oracle accuracy climbs in front of you.
+          The tokenizer proves the loop. To prove it is not a tokenizer tool, you
+          hand the same swarm a real repo and a test command. It discovers what is
+          broken, fixes it with the LLM, and grades itself against{" "}
+          <span className="text-amber-300">your</span> suite, with no deterministic
+          safety net.
         </Lede>
 
-        <div className="mt-10 flex items-center justify-center gap-6">
-          {[
-            { v: "0.71", label: "gap detected", accent: "amber" as AccentName },
-            { v: "0.86", label: "bead injected", accent: "violet" as AccentName },
-            { v: "1.00", label: "covered", accent: "cyan" as AccentName },
-          ].map((step, i, arr) => (
-            <div key={step.label} className="flex items-center gap-6">
-              <Panel accent={step.accent} className="px-8 py-6 text-center">
-                <div
-                  className={`text-5xl font-bold tabular-nums ${ACCENTS[step.accent].text}`}
-                >
-                  {step.v}
-                </div>
-                <div className="mt-2 font-mono text-sm uppercase tracking-[0.16em] text-slate-500">
-                  {step.label}
-                </div>
-              </Panel>
-              {i < arr.length - 1 && (
-                <span className="font-mono text-3xl text-slate-600">{"->"}</span>
-              )}
+        <div className="mt-9 grid gap-4 md:grid-cols-3">
+          <Panel accent="amber" className="p-6">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-amber-300/80">
+              1 . discover
             </div>
-          ))}
+            <p className="text-lg leading-relaxed text-slate-300">
+              Run the suite once. The failing test modules become the scoring
+              groups, live.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Pill accent="amber">calc</Pill>
+              <Pill accent="amber">textutil</Pill>
+            </div>
+          </Panel>
+          <Panel accent="violet" className="p-6">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-violet-300/80">
+              2 . fix
+            </div>
+            <p className="text-lg leading-relaxed text-slate-300">
+              Workers author real edits with the LLM. An edit is kept only if it{" "}
+              <span className="text-violet-300">strictly raises the score</span>.
+              No fallback, so a bead that does not help bounces.
+            </p>
+          </Panel>
+          <Panel accent="emerald" className="p-6">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-emerald-300/80">
+              3 . green
+            </div>
+            <p className="text-lg leading-relaxed text-slate-300">
+              The real pytest pass-rate climbs. Workers edit a disposable sandbox,
+              so the source repo is <span className="text-emerald-300">never
+              mutated</span>, and test files are read-only.
+            </p>
+          </Panel>
         </div>
 
-        <p className="mt-10 text-center text-lg text-slate-400">
-          Not a slide animation. A real bead in the <Mono>br</Mono> graph, scored
-          by the same oracle.
-        </p>
+        <div className="mt-8 flex flex-wrap items-center gap-10">
+          <Stat value="0.50 -> 1.00" label="real pytest pass-rate" accent="emerald" />
+          <Stat value="2 / 2" label="modules fixed by the LLM" accent="amber" />
+          <Stat value="no fallback" label="the score is what it earned" accent="violet" />
+        </div>
+
+        <Takeaway accent="amber">
+          Two targets, one swarm: a Rust tokenizer with an exact oracle, and any
+          repo you hand it with its own test suite as the oracle.
+        </Takeaway>
       </SlideShell>
     ),
   },
 
-  // 9. The cockpit
+  // 8. The cockpit
   {
     id: "cockpit",
     title: "The cockpit",
@@ -632,14 +682,39 @@ export const SLIDES: Slide[] = [
           </Panel>
         </div>
 
-        <Panel className="mt-6 px-6 py-5">
-          <p className="text-pretty text-xl leading-relaxed text-slate-300">
-            Type{" "}
-            <Mono accent="cyan">port the BPE tokenizer to Rust</Mono> into chat.
-            The planner decomposes, beads appear on the chain, worker lanes light
-            up amber, a bead travels to the validator, the curve moves.
+        {/* The live "spot a gap, inject a bead" beat, folded in as a cockpit cue. */}
+        <Panel accent="violet" className="mt-6 flex flex-wrap items-center justify-between gap-5 px-6 py-5">
+          <p className="max-w-md text-pretty text-lg leading-relaxed text-slate-300">
+            Mid-run the swarm spots a missing capability and injects a real bead
+            into the <Mono>br</Mono> graph live. The oracle accuracy jumps in front
+            of you.
           </p>
+          <div className="flex items-center gap-3">
+            {[
+              { v: "0.71", label: "gap", accent: "amber" as AccentName },
+              { v: "0.86", label: "injected", accent: "violet" as AccentName },
+              { v: "1.00", label: "covered", accent: "cyan" as AccentName },
+            ].map((s, i, arr) => (
+              <div key={s.label} className="flex items-center gap-3">
+                <div className="text-center">
+                  <div className={`text-3xl font-bold tabular-nums ${ACCENTS[s.accent].text}`}>
+                    {s.v}
+                  </div>
+                  <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                    {s.label}
+                  </div>
+                </div>
+                {i < arr.length - 1 && (
+                  <span className="font-mono text-xl text-slate-600">{"->"}</span>
+                )}
+              </div>
+            ))}
+          </div>
         </Panel>
+        <Takeaway accent="cyan">
+          In the live demo, watch for four events: bead created, bead claimed,
+          validation scored, planner rewritten.
+        </Takeaway>
       </SlideShell>
     ),
   },
@@ -654,15 +729,21 @@ export const SLIDES: Slide[] = [
         <Eyebrow accent="amber">sponsors, all load-bearing</Eyebrow>
         <Title>None of these are bolted on.</Title>
 
+        <SponsorStrip
+          label="powered by"
+          align="left"
+          className="mt-8 border-y border-slate-800/70 py-6"
+        />
+
         <div className="mt-9 grid gap-5 md:grid-cols-3">
           <Panel accent="cyan" className="flex flex-col gap-3 p-6">
             <div className="font-mono text-2xl font-semibold text-cyan-300">
               Weave
             </div>
             <p className="text-base leading-relaxed text-slate-300">
-              Tracing, the Evaluation, and the self-improvement backbone. Plus the
-              W&B MCP server. The improver consumes Weave-graded gaps to rewrite
-              the skill.
+              Tracing for the planner, workers, validator, improver, and LLM
+              calls. The improver consumes the Weave-traced oracle gaps to
+              rewrite the skill.
             </p>
           </Panel>
           <Panel accent="rose" className="flex flex-col gap-3 p-6">
@@ -670,9 +751,11 @@ export const SLIDES: Slide[] = [
               Redis
             </div>
             <p className="text-base leading-relaxed text-slate-300">
-              The event stream (<Mono>glassbox:events</Mono>), the per-task
-              leaderboard sorted set (<Mono>{"glassbox:planner_scores:{task}"}</Mono>),
-              and the bead-graph mirror for board hydration.
+              The live bus, not just storage. A Stream (
+              <Mono>glassbox:events</Mono>) fans every agent event to the tldraw
+              board over SSE, a sorted set per task (
+              <Mono>{"glassbox:planner_scores:{task}"}</Mono>) ranks the curve, and
+              a bead-graph mirror hydrates the board on load.
             </p>
           </Panel>
           <Panel accent="emerald" className="flex flex-col gap-3 p-6">
@@ -680,8 +763,41 @@ export const SLIDES: Slide[] = [
               CopilotKit
             </div>
             <p className="text-base leading-relaxed text-slate-300">
-              The chat command bar and generative UI over AG-UI. Surfaces the
-              curve and leaderboard as React components inside the thread.
+              The command bar over AG-UI. Four frontend tools (launch, climb,
+              live, propose) let the operator start a run by typing, a
+              human-in-the-loop approval card gates the climb, and the curve and
+              leaderboard render as generative UI inside the thread.
+            </p>
+          </Panel>
+        </div>
+
+        {/* The rest of the load-bearing stack, named so judges see every piece. */}
+        <div className="mt-5 grid gap-3 md:grid-cols-3">
+          <Panel accent="violet" className="p-5">
+            <div className="font-mono text-lg font-semibold text-violet-300">
+              Agent Mail
+            </div>
+            <p className="mt-1 text-sm leading-relaxed text-slate-400">
+              Agent-to-agent messages and advisory file leases. Every handoff
+              shows up as a thread in the cockpit drawer.
+            </p>
+          </Panel>
+          <Panel accent="violet" className="p-5">
+            <div className="font-mono text-lg font-semibold text-violet-300">
+              Beads (br)
+            </div>
+            <p className="mt-1 text-sm leading-relaxed text-slate-400">
+              The dependency-aware issue graph. The planner writes it, the
+              coordinator routes <Mono>br ready</Mono> beads to workers.
+            </p>
+          </Panel>
+          <Panel accent="amber" className="p-5">
+            <div className="font-mono text-lg font-semibold text-amber-300">
+              tldraw
+            </div>
+            <p className="mt-1 text-sm leading-relaxed text-slate-400">
+              The programmatic canvas: agent lanes and capability-colored beads,
+              animated entirely from the Redis event stream.
             </p>
           </Panel>
         </div>
@@ -690,6 +806,10 @@ export const SLIDES: Slide[] = [
           Swarm on W&B Inference (<Mono>openai/gpt-oss-120b</Mono>), chat on{" "}
           <Mono>meta-llama/Llama-3.3-70B-Instruct</Mono>. Weave auto-traces both.
         </p>
+        <Takeaway accent="amber">
+          Each sponsor is in the critical path: observe, stream, launch, and
+          explain the run.
+        </Takeaway>
       </SlideShell>
     ),
   },
@@ -710,8 +830,8 @@ export const SLIDES: Slide[] = [
               Brand new repo, committed every phase.
             </Point>
             <Point accent="emerald">
-              Ours: the planner loop, the oracle harness, the cockpit, and the
-              self-improvement loop.
+              Ours: the swarm loop, task/evaluator abstraction, oracle harness,
+              cockpit, and self-improvement loop.
             </Point>
             <Point accent="emerald">
               Patina (a larger Godot-to-Rust port) is referenced as context only.
@@ -725,7 +845,7 @@ export const SLIDES: Slide[] = [
             </div>
             <div className="flex flex-wrap gap-2.5">
               <Pill accent="violet">Beads (br)</Pill>
-              <Pill accent="violet">Agent Mail</Pill>
+              <Pill accent="violet">Agent Mail style handoffs</Pill>
               <Pill accent="amber">tldraw</Pill>
               <Pill accent="emerald">CopilotKit</Pill>
               <Pill accent="cyan">recharts</Pill>
@@ -733,6 +853,10 @@ export const SLIDES: Slide[] = [
             </div>
           </Panel>
         </div>
+        <Takeaway accent="emerald">
+          The borrowed pieces are named. The agent loop, evaluator, cockpit, and
+          planner rewrite path are the fresh build.
+        </Takeaway>
       </SlideShell>
     ),
   },
@@ -790,7 +914,9 @@ export const SLIDES: Slide[] = [
             </a>
           </div>
 
-          <p className="mt-10 font-mono text-sm tracking-wide text-slate-500">
+          <SponsorStrip align="left" className="mt-12" />
+
+          <p className="mt-8 font-mono text-sm tracking-wide text-slate-500">
             handoff to the live board at <span className="text-cyan-300">/</span>
           </p>
         </div>

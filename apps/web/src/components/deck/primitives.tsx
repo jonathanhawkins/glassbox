@@ -136,6 +136,27 @@ export function Lede({ children }: { children: ReactNode }) {
   );
 }
 
+/** A compact judge-facing takeaway banner. */
+export function Takeaway({
+  accent = "cyan",
+  children,
+}: {
+  accent?: AccentName;
+  children: ReactNode;
+}) {
+  const a = ACCENTS[accent];
+  return (
+    <div
+      className={`mt-7 rounded-xl border ${a.border} ${a.bg} px-4 py-3 text-pretty text-base leading-relaxed text-slate-200`}
+    >
+      <span className={`font-mono text-xs uppercase tracking-[0.18em] ${a.text}`}>
+        judge takeaway
+      </span>
+      <span className="ml-3">{children}</span>
+    </div>
+  );
+}
+
 /** A small capsule, used for stack chips and quiet labels. */
 export function Pill({
   accent = "cyan",
