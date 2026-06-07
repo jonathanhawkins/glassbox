@@ -91,27 +91,31 @@ def _snapshot_beads() -> dict[str, Any]:
     }
 
 
-def _snapshot_skill() -> dict[str, Any]:
-    """Build the skill mirror: the current SKILL.md plus every version snapshot.
+def _snapshot_skill(cfg: Any = None) -> dict[str, Any]:
+    """Build a task's skill mirror: current text, covered groups, the group order +
+    unit (for the cockpit tiles), and every version snapshot.
 
-    versions = [{version, covered, text}] read from agents/planner/history/, so
-    the cockpit can render and step through how the planner skill grew v1 -> vN.
-    Best effort: any read failure degrades to an empty field, never raises.
+    versions = [{version, covered, text}] read from the task's history dir, so the
+    cockpit can render and step through how the planner skill grew v1 -> vN. Best
+    effort: any read failure degrades to an empty field, never raises. ``cfg``
+    defaults to the tokenizer skill.
     """
     from pathlib import Path
 
+    if cfg is None:
+        cfg = skill.TOKENIZER
     try:
-        current = skill.read_skill()
+        current = skill.read_skill(cfg.skill_path)
     except OSError as exc:  # noqa: BLE001 - mirror is best effort
         current = ""
         print(f"[poller] skill.read_skill() failed: {exc}")
     try:
-        covered = skill.covered_categories()
+        covered = skill.covered_categories(cfg)
     except ValueError:
         covered = []
     versions: list[dict[str, Any]] = []
     try:
-        for entry in skill.history():
+        for entry in skill.history(cfg):
             try:
                 text = skill.read_skill(Path(entry["path"]))
             except OSError:
@@ -129,6 +133,8 @@ def _snapshot_skill() -> dict[str, Any]:
         "ts": int(time.time() * 1000),
         "current": current,
         "covered": covered,
+        "order": list(cfg.order),
+        "unit": cfg.unit,
         "versions": versions,
     }
 
@@ -289,11 +295,11 @@ def health() -> dict[str, bool]:
 
 
 @app.get("/leaderboard")
-def leaderboard() -> list[dict[str, Any]]:
-    """Return the planner-version leaderboard, ascending by accuracy."""
+def leaderboard(task: str = "tokenizer") -> list[dict[str, Any]]:
+    """Return the task's planner-version leaderboard, ascending by accuracy."""
     return [
         {"version": version, "accuracy": accuracy}
-        for version, accuracy in bus.get_leaderboard()
+        for version, accuracy in bus.get_leaderboard(task)
     ]
 
 
@@ -358,14 +364,16 @@ def post_live(req: LiveRequest) -> dict[str, Any]:
 
 
 @app.get("/skill")
-def get_skill() -> dict[str, Any]:
-    """Return the planner skill mirror: current text, coverage, per-version text.
+def get_skill(task: str = "tokenizer") -> dict[str, Any]:
+    """Return the task's planner skill mirror: current text, coverage, group order +
+    unit, and per-version text, read on demand so it reflects the requested task.
 
-    Same shape as the Redis ``glassbox:skill`` cache the poller writes:
-    {ts, current, covered, versions: [{version, covered, text}]} read from
-    agents/planner/history/ so the cockpit can read and step through v1 -> vN.
+    Shape: {ts, current, covered, order, unit, versions: [{version, covered, text}]}.
     """
-    return _snapshot_skill()
+    from tasks import load_task
+
+    cfg = load_task(task).skill or skill.TOKENIZER
+    return _snapshot_skill(cfg)
 
 
 @app.post("/reset")

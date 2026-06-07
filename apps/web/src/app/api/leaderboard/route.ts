@@ -9,17 +9,19 @@ const PLANNER_SCORES = REDIS.plannerScores;
 type LeaderboardRow = { version: number; accuracy: number };
 
 /**
- * GET /api/leaderboard -> [{ version, accuracy }] sorted by version asc.
+ * GET /api/leaderboard?task=tokenizer -> [{ version, accuracy }] by version asc.
  *
- * Reads the glassbox:planner_scores sorted set where member = planner_version
- * (as a string) and score = accuracy. ZRANGE WITHSCORES returns a flat
- * [member, score, member, score, ...] list ordered by score; we reshape it and
- * sort by version so the cockpit can plot a stable left-to-right climb curve.
+ * Reads the per-task glassbox:planner_scores:{task} sorted set where member =
+ * planner_version (as a string) and score = accuracy, so the tokenizer and the
+ * kata keep separate curves. ZRANGE WITHSCORES returns a flat [member, score, ...]
+ * list ordered by score; we reshape and sort by version for a stable climb curve.
  */
-export async function GET() {
+export async function GET(request: Request) {
+  const task = new URL(request.url).searchParams.get("task") || "tokenizer";
+  const key = `${PLANNER_SCORES}:${task}`;
   try {
     const redis = getRedis();
-    const flat = await redis.zrange(PLANNER_SCORES, 0, -1, "WITHSCORES");
+    const flat = await redis.zrange(key, 0, -1, "WITHSCORES");
 
     const rows: LeaderboardRow[] = [];
     for (let i = 0; i + 1 < flat.length; i += 2) {

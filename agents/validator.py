@@ -131,7 +131,7 @@ def validate(
     accuracy = float(result.score)
     passed = accuracy > 0.0
 
-    bus.set_planner_score(planner_version, accuracy)
+    bus.set_planner_score(planner_version, accuracy, task=getattr(task, "name", "tokenizer"))
 
     # The real per-group failure breakdown (biggest gap first) is the signal the
     # improver prioritizes on and the cockpit surfaces as "what it found".

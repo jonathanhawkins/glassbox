@@ -37,6 +37,7 @@ from contract.events import (  # noqa: E402
     PLANNER_SCORES,
     SKILL_STATE,
     make_event,
+    planner_scores_key,
 )
 
 _DEFAULT_URL = "redis://127.0.0.1:6379"
@@ -157,19 +158,20 @@ def set_agent_status(
     )
 
 
-def set_planner_score(version: int, accuracy: float) -> float:
-    """ZADD the planner version's accuracy onto the leaderboard sorted set.
+def set_planner_score(version: int, accuracy: float, task: str = "tokenizer") -> float:
+    """ZADD the planner version's accuracy onto the task's leaderboard sorted set.
 
-    member = str(version), score = accuracy (0..1). Drives the climbing
-    correctness curve and the leaderboard in the cockpit. Returns accuracy.
+    member = str(version), score = accuracy (0..1), key = per-task (so the tokenizer
+    and the kata keep separate curves). Drives the climbing correctness curve and
+    the leaderboard in the cockpit. Returns accuracy.
     """
-    get_client().zadd(PLANNER_SCORES, {str(version): float(accuracy)})
+    get_client().zadd(planner_scores_key(task), {str(version): float(accuracy)})
     return float(accuracy)
 
 
-def get_leaderboard() -> list[tuple[int, float]]:
-    """Return [(version, accuracy), ...] sorted by accuracy ascending."""
-    rows = get_client().zrange(PLANNER_SCORES, 0, -1, withscores=True)
+def get_leaderboard(task: str = "tokenizer") -> list[tuple[int, float]]:
+    """Return the task's [(version, accuracy), ...] sorted by accuracy ascending."""
+    rows = get_client().zrange(planner_scores_key(task), 0, -1, withscores=True)
     out: list[tuple[int, float]] = []
     for member, score in rows:
         try:
@@ -192,8 +194,13 @@ def reset_state() -> dict[str, int]:
     # SKILL_STATE is intentionally cleared too: a stale full-coverage mirror
     # surviving a reset is more confusing than a brief gap. The next run re-seeds
     # it (the climb's snapshot / a fresh plan), so the empty window is momentary.
-    for key in (EVENTS_STREAM, PLANNER_SCORES, BEADS_STATE, SKILL_STATE):
+    for key in (EVENTS_STREAM, BEADS_STATE, SKILL_STATE):
         deleted += int(client.delete(key) or 0)
+    # Every per-task leaderboard (glassbox:planner_scores:{task}) plus the legacy
+    # base key, so a stale task's curve never survives a reset.
+    score_keys = list(client.scan_iter(match=f"{PLANNER_SCORES}*", count=200))
+    if score_keys:
+        deleted += int(client.delete(*score_keys) or 0)
     run_keys = list(client.scan_iter(match="glassbox:run:*", count=200))
     if run_keys:
         deleted += int(client.delete(*run_keys) or 0)
