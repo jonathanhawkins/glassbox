@@ -3,54 +3,62 @@
 // SkillViewerDrawer: read the planner's actual SKILL.md and step through every
 // version (v1..vN) to watch the self-improvement happen. A right-slide drawer
 // positioned `fixed` so it covers the viewport and can be mounted from anywhere
-// (here, from the bottom-center skill strip). Data comes from GET /api/skill
-// (the live Redis mirror glassbox:skill, which is file-backed). For each version
-// it highlights the lines ADDED since the previous version, so the new coverage
-// category line and each new "## Revision vN" rationale stand out in green.
+// (here, from the bottom-center skill strip). Data comes from GET /api/skill?task=
+// (the requested task's skill, read on demand). For each version it highlights the
+// lines ADDED since the previous version, so the new coverage group line and each
+// new "## Revision vN" rationale stand out in green. The active task is threaded
+// in so the drawer shows the right task's skill + ordered group chips.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
-import {
-  CAP_COLORS,
-  CAP_LABELS,
-  CATEGORY_ORDER,
-  type Capability,
-} from "@/lib/cockpit/types";
+import { groupColor, groupLabel } from "@/lib/cockpit/types";
+import type { TaskName } from "@/lib/cockpit/tasks";
 
 type SkillVersion = { version: number; covered: string[]; text: string };
 type SkillData = {
   current: string;
   covered: string[];
+  // The active task's ordered group list (the chips to render) + the group noun.
+  order: string[];
+  unit: string;
   versions: SkillVersion[];
 };
 
 export function SkillViewerDrawer({
   open,
   onClose,
+  activeTask,
 }: {
   open: boolean;
   onClose: () => void;
+  activeTask: TaskName;
 }) {
   const [data, setData] = useState<SkillData | null>(null);
   const [acc, setAcc] = useState<Record<number, number>>({});
   const [idx, setIdx] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the skill + per-version accuracy each time the drawer opens, so the
-  // versions reflect the latest climb.
+  // Load the skill + per-version accuracy each time the drawer opens (or the task
+  // changes while open), so the versions + chips reflect the latest climb of the
+  // active task.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/skill", { cache: "no-store" });
+        const res = await fetch(
+          `/api/skill?task=${encodeURIComponent(activeTask)}`,
+          { cache: "no-store" },
+        );
         const d = (await res.json()) as SkillData;
         if (cancelled) return;
         const versions = Array.isArray(d?.versions) ? d.versions : [];
         setData({
           current: d?.current ?? "",
           covered: d?.covered ?? [],
+          order: Array.isArray(d?.order) ? d.order : [],
+          unit: typeof d?.unit === "string" ? d.unit : "category",
           versions,
         });
         setIdx(versions.length ? versions.length - 1 : 0);
@@ -62,7 +70,10 @@ export function SkillViewerDrawer({
           setError(e instanceof Error ? e.message : "failed to load skill");
       }
       try {
-        const res = await fetch("/api/leaderboard", { cache: "no-store" });
+        const res = await fetch(
+          `/api/leaderboard?task=${encodeURIComponent(activeTask)}`,
+          { cache: "no-store" },
+        );
         const rows = (await res.json()) as {
           version: number;
           accuracy: number;
@@ -79,7 +90,7 @@ export function SkillViewerDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, activeTask]);
 
   // Escape closes the drawer.
   useEffect(() => {
@@ -112,6 +123,9 @@ export function SkillViewerDrawer({
   );
 
   const coveredSet = new Set(cur?.covered ?? []);
+  // The chip set is the active task's ordered group list from the skill mirror;
+  // fall back to the current version's covered groups if the order is missing.
+  const order = data?.order?.length ? data.order : (cur?.covered ?? []);
 
   // Portal to <body> so the drawer escapes the strip's transformed wrapper (a
   // `fixed` element inside a transformed ancestor is positioned relative to that
@@ -185,7 +199,7 @@ export function SkillViewerDrawer({
           </button>
           {cur && (
             <span className="ml-auto text-[11px] tabular-nums text-slate-400">
-              {coveredSet.size}/{CATEGORY_ORDER.length} covered
+              {coveredSet.size}/{order.length} covered
               {acc[cur.version] !== undefined
                 ? ` · ${(acc[cur.version] * 100).toFixed(0)}%`
                 : ""}
@@ -195,10 +209,10 @@ export function SkillViewerDrawer({
 
         {cur && (
           <div className="flex flex-wrap gap-1.5 border-b border-slate-800/70 px-4 py-2.5">
-            {CATEGORY_ORDER.map((c) => {
+            {order.map((c) => {
               const on = coveredSet.has(c);
               const justAdded = !!prev && on && !new Set(prev.covered).has(c);
-              const color = CAP_COLORS[c as Capability];
+              const color = groupColor(c);
               return (
                 <span
                   key={c}
@@ -211,7 +225,7 @@ export function SkillViewerDrawer({
                   }}
                 >
                   {justAdded ? "+ " : ""}
-                  {CAP_LABELS[c as Capability]}
+                  {groupLabel(c)}
                 </span>
               );
             })}

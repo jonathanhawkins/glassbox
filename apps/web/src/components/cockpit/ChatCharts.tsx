@@ -17,19 +17,37 @@ import {
   YAxis,
 } from "recharts";
 
+import { useActiveTask } from "@/lib/cockpit/ActiveTaskContext";
+import type { TaskName } from "@/lib/cockpit/tasks";
+
 type LeaderboardRow = { version: number; accuracy: number };
 
-// Shared poller. Refreshes the leaderboard a few times so an in-flight run fills
-// in, then settles. `live` keeps polling for the duration of an active climb.
+// Shared poller. Refreshes the active task's leaderboard a few times so an
+// in-flight run fills in, then settles. `live` keeps polling for the duration of
+// an active climb. The task comes from context (these charts are rendered by
+// CopilotKit tool callbacks the cockpit cannot prop-drill into).
 function useLeaderboard(live = true) {
+  const activeTask = useActiveTask();
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
   const [loaded, setLoaded] = useState(false);
+  // Reset during render when the task switches (the React-recommended pattern),
+  // so the chart shows the new task's loading state instead of the old rows while
+  // the first poll is in flight, without a clearing setState inside the effect.
+  const [rowsTask, setRowsTask] = useState<TaskName>(activeTask);
+  if (rowsTask !== activeTask) {
+    setRowsTask(activeTask);
+    setRows([]);
+    setLoaded(false);
+  }
 
   useEffect(() => {
     let alive = true;
     const poll = async () => {
       try {
-        const res = await fetch("/api/leaderboard", { cache: "no-store" });
+        const res = await fetch(
+          `/api/leaderboard?task=${encodeURIComponent(activeTask)}`,
+          { cache: "no-store" },
+        );
         const data = (await res.json()) as LeaderboardRow[];
         if (alive && Array.isArray(data)) {
           setRows(data);
@@ -46,7 +64,7 @@ function useLeaderboard(live = true) {
       alive = false;
       clearInterval(t);
     };
-  }, [live]);
+  }, [live, activeTask]);
 
   return { rows, loaded };
 }

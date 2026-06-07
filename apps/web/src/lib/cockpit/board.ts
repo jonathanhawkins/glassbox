@@ -22,6 +22,7 @@ import {
   BEAD_H,
   BEAD_W,
   BOARD_BOUNDS,
+  CATEGORY_ORDER,
   DOCK_H,
   DOCK_W,
   DONE_RAIL,
@@ -109,6 +110,12 @@ export class BoardController {
   private agentShapeId = new Map<string, TLShapeId>();
   private dockShapeId = new Map<string, TLShapeId>();
   private workerResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Per-bead "land it" timers. animateShape's final settle goes through the
+  // lock-respecting update path, so a locked bead never gets snapped exactly onto
+  // its target, and a rapid claim->done or a throttled animation frame can leave
+  // it short of (or never moving toward) its dock. Each move arms a timer that
+  // forces the exact landing once the animation window closes (see moveBead).
+  private beadLandTimers = new Map<TLShapeId, ReturnType<typeof setTimeout>>();
   private nextBacklogSlot = 0;
   private nextDoneSlot = 0;
   private routeIdx = 0; // fallback round-robin when an event lacks a worker agent
@@ -125,8 +132,13 @@ export class BoardController {
   onSkill?: (state: SkillState) => void;
 
   // Live planner-skill state derived from the event stream (for the skill strip).
+  // `order`/`unit` default to the tokenizer's so a pre-hydration render matches
+  // today's view; hydrateSkill swaps in the active task's groups on load and on
+  // every task switch.
   private skill: SkillState = {
     version: 1,
+    order: [...CATEGORY_ORDER],
+    unit: "category",
     covered: [],
     accuracy: null,
     lastGap: null,
@@ -138,16 +150,40 @@ export class BoardController {
     this.editor = editor;
   }
 
-  /** Push the current skill state to the overlay (copying the covered array). */
+  /** Push the current skill state to the overlay (copying the array fields). */
   private publishSkill() {
-    this.onSkill?.({ ...this.skill, covered: [...this.skill.covered] });
+    this.onSkill?.({
+      ...this.skill,
+      order: [...this.skill.order],
+      covered: [...this.skill.covered],
+    });
   }
 
-  /** Seed the skill strip from GET /api/skill + the leaderboard on mount. */
-  hydrateSkill(covered: string[], version: number, accuracy: number | null) {
+  /**
+   * Seed the skill strip from GET /api/skill?task= + the leaderboard. Called on
+   * mount and again whenever the active task switches, so the strip renders the
+   * NEW task's group tiles (order/unit) and its covered/version/accuracy, instead
+   * of carrying the previous task's coverage. `order`/`unit` come straight from
+   * the task's skill mirror; if omitted (older callers) the current order is kept.
+   */
+  hydrateSkill(
+    covered: string[],
+    version: number,
+    accuracy: number | null,
+    order?: string[],
+    unit?: string,
+  ) {
+    if (Array.isArray(order)) this.skill.order = order.map(String);
+    if (typeof unit === "string" && unit) this.skill.unit = unit;
     this.skill.covered = covered.map(String);
-    if (Number.isFinite(version)) this.skill.version = version;
-    if (accuracy !== null && Number.isFinite(accuracy)) this.skill.accuracy = accuracy;
+    // A fresh task starts with a clean gap/added/failing readout; the live event
+    // stream repopulates these as runs for the new task arrive.
+    this.skill.lastGap = null;
+    this.skill.lastAdded = null;
+    this.skill.failing = [];
+    this.skill.version = Number.isFinite(version) ? version : 1;
+    this.skill.accuracy =
+      accuracy !== null && Number.isFinite(accuracy) ? accuracy : null;
     this.publishSkill();
   }
 
@@ -308,6 +344,8 @@ export class BoardController {
     this.dockShapeId.clear();
     for (const t of this.workerResetTimers.values()) clearTimeout(t);
     this.workerResetTimers.clear();
+    for (const t of this.beadLandTimers.values()) clearTimeout(t);
+    this.beadLandTimers.clear();
     this.nextBacklogSlot = 0;
     this.nextDoneSlot = 0;
     this.routeIdx = 0;
@@ -360,6 +398,26 @@ export class BoardController {
 
   private moveBead(rec: BeadRecord, x: number, y: number, opts: AnimateOpts = ANIM) {
     this.editor.animateShape({ id: rec.shapeId, type: "bead", x, y }, opts);
+    // Guarantee the landing. Beads are locked, and tldraw's animateShape settle
+    // path skips locked shapes, so the bead is never snapped exactly onto its
+    // target (and if the animation frames are throttled or a newer move arrives
+    // first, it can be left well short, e.g. stuck back in the backlog). Once the
+    // animation window closes, force the exact position through the lock so a task
+    // always sits squarely in its dock box, never offset.
+    const shapeId = rec.shapeId;
+    const prev = this.beadLandTimers.get(shapeId);
+    if (prev) clearTimeout(prev);
+    const t = setTimeout(() => {
+      this.beadLandTimers.delete(shapeId);
+      const shape = this.editor.getShape(shapeId);
+      if (!shape) return;
+      if (Math.abs(shape.x - x) < 0.5 && Math.abs(shape.y - y) < 0.5) return;
+      this.editor.run(
+        () => this.editor.updateShape({ id: shapeId, type: "bead", x, y }),
+        { ignoreShapeLock: true },
+      );
+    }, opts.animation.duration + 80);
+    this.beadLandTimers.set(shapeId, t);
   }
 
   /** Create a bead chip in the backlog. Returns its record (existing if known). */
@@ -735,6 +793,8 @@ export class BoardController {
   dispose() {
     for (const t of this.workerResetTimers.values()) clearTimeout(t);
     this.workerResetTimers.clear();
+    for (const t of this.beadLandTimers.values()) clearTimeout(t);
+    this.beadLandTimers.clear();
     if (this.reframeTimer) clearTimeout(this.reframeTimer);
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;

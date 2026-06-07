@@ -60,6 +60,45 @@ export function capColor(cap: string | undefined): string {
   return UNKNOWN_CAP_COLOR;
 }
 
+// --- Task-agnostic group palette ------------------------------------------
+// The cockpit now runs more than one task (the tokenizer's 7 input categories,
+// the kata's 4 test modules), and each task hands us its own ordered group list
+// at runtime via /api/skill?task=. The tokenizer's groups keep their hand-picked
+// neon palette + short labels (CAP_COLORS / CAP_LABELS) so its view is unchanged;
+// any group outside that palette (the kata's slug/wrap/template, or a future
+// task's groups) gets a STABLE derived color and label, so the strip renders N
+// tiles for whatever task is active without a per-task constant table.
+
+/** djb2 string hash, used to map an unknown group name to a stable hue. */
+function hashString(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (h * 33) ^ s.charCodeAt(i);
+  return h >>> 0;
+}
+
+/**
+ * A stable color for any scoring group. Known tokenizer groups keep their
+ * hand-tuned neon from CAP_COLORS; unknown groups hash their name to a fixed HSL
+ * hue (saturated and bright enough to read on the dark board), so the same group
+ * always gets the same color across renders and reloads.
+ */
+export function groupColor(group: string): string {
+  if (group in CAP_COLORS) return CAP_COLORS[group as Capability];
+  const hue = hashString(group) % 360;
+  return `hsl(${hue}, 70%, 62%)`;
+}
+
+/**
+ * A short tile label for any scoring group. Known tokenizer groups keep their
+ * curated abbreviation from CAP_LABELS; unknown groups are title-cased from their
+ * raw name (e.g. "template" -> "Template").
+ */
+export function groupLabel(group: string): string {
+  if (group in CAP_LABELS) return CAP_LABELS[group as Capability];
+  if (!group) return group;
+  return group.charAt(0).toUpperCase() + group.slice(1);
+}
+
 /** Status light colors for an agent lane. */
 export const STATUS_COLORS: Record<AgentStatus, string> = {
   idle: "#475569", // slate-600
@@ -211,17 +250,22 @@ export const CATEGORY_ORDER: Capability[] = [
 
 /**
  * Live planner-skill state the board derives from the event stream and hands to
- * the PlannerSkillPanel. `covered` is a subset of CATEGORY_ORDER; `lastGap` is
- * the category the latest Weave eval flagged; `lastAdded` is the category the
- * latest improver rewrite added.
+ * the PlannerSkillPanel. `order` is the ACTIVE task's ordered group list (the
+ * tiles to render: 7 for the tokenizer, 4 for the kata), hydrated per task from
+ * /api/skill?task=; `covered` is the subset of `order` the skill currently
+ * covers; `unit` is the task's group noun ("category" or "module") for the
+ * narration; `lastGap` is the group the latest Weave eval flagged; `lastAdded` is
+ * the group the latest improver rewrite added.
  */
 export type SkillState = {
   version: number;
+  order: string[];
+  unit: string;
   covered: string[];
   accuracy: number | null;
   lastGap: { category: string; accuracy: number; failed?: number } | null;
   lastAdded: string | null;
-  // Per-category exact-match failures the latest eval found (the data-driven
+  // Per-group exact-match failures the latest eval found (the data-driven
   // signal behind which gap the improver fixes next). Biggest first.
   failing: { category: string; failed: number }[];
 };

@@ -25,8 +25,8 @@ import { useFrontendTool, useHumanInTheLoop } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 
 import { ChatCorrectnessCurve, ChatLeaderboard } from "./ChatCharts";
-
-const DEFAULT_GOAL = "port the BPE tokenizer to Rust";
+import { useActiveTask } from "@/lib/cockpit/ActiveTaskContext";
+import { TASK_GOALS, type TaskName } from "@/lib/cockpit/tasks";
 
 type LaunchResult =
   | { ok: true; kind: string; id: string }
@@ -182,10 +182,12 @@ function ImprovementApprovalCard({
   plan,
   respond,
   result,
+  task,
 }: {
   plan?: string;
   respond?: (result: unknown) => Promise<void>;
   result?: string;
+  task: TaskName;
 }) {
   const [phase, setPhase] = useState<"idle" | "approving" | "declining">("idle");
   const awaiting = typeof respond === "function";
@@ -215,7 +217,11 @@ function ImprovementApprovalCard({
   const onApprove = async () => {
     if (!respond) return;
     setPhase("approving");
-    const r = await launch("/api/loop", { goal: DEFAULT_GOAL, max_versions: 7 }, "climb");
+    const r = await launch(
+      "/api/loop",
+      { goal: TASK_GOALS[task], max_versions: 7, task },
+      "climb",
+    );
     await respond(
       r.ok
         ? `Operator approved. Self-improvement climb started (${r.id}). Watch the board and the curve climb.`
@@ -284,6 +290,12 @@ const proposeSchema = z.object({
 });
 
 export function CopilotActions() {
+  // The operator's selected build target (from the cockpit, via context). Every
+  // chat-launched run targets it, and its default goal prefills the launch body,
+  // so a climb started from the chat builds the same task the strip + curve show.
+  const task = useActiveTask();
+  const goal = TASK_GOALS[task];
+
   // launchRun: one full-plan graded run (climbs toward ~100% in a single pass).
   useFrontendTool({
     name: "launchRun",
@@ -295,7 +307,7 @@ export function CopilotActions() {
       <LaunchEffectCard
         title="Launch run"
         path="/api/run"
-        body={{ goal: DEFAULT_GOAL }}
+        body={{ goal, task }}
         kind="run"
       />
     ),
@@ -314,7 +326,7 @@ export function CopilotActions() {
       <LaunchEffectCard
         title="Self-improvement climb"
         path="/api/loop"
-        body={{ goal: DEFAULT_GOAL, max_versions: 7 }}
+        body={{ goal, max_versions: 7, task }}
         kind="climb"
       />
     ),
@@ -332,7 +344,7 @@ export function CopilotActions() {
       <LaunchEffectCard
         title="Live inject beat"
         path="/api/live"
-        body={{ goal: DEFAULT_GOAL, injections: 2 }}
+        body={{ goal, injections: 2, task }}
         kind="live"
       />
     ),
@@ -351,6 +363,7 @@ export function CopilotActions() {
         plan={args.plan}
         respond={respond}
         result={typeof result === "string" ? result : undefined}
+        task={task}
       />
     ),
   });

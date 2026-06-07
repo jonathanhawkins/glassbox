@@ -1,8 +1,10 @@
 "use client";
 
-// The money shot: the correctness curve. Polls GET /api/leaderboard every 1.5s
-// and plots accuracy (0..1) against planner version, climbing left to right as
-// the improver closes capability gaps. recharts AreaChart with a neon stroke.
+// The money shot: the correctness curve. Polls GET /api/leaderboard?task= every
+// 1.5s and plots accuracy (0..1) against planner version, climbing left to right
+// as the improver closes capability gaps. recharts AreaChart with a neon stroke.
+// The active task is threaded in so the curve reflects whichever target the
+// operator is running (the tokenizer and the kata keep separate per-task curves).
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -15,16 +17,30 @@ import {
   YAxis,
 } from "recharts";
 
+import type { TaskName } from "@/lib/cockpit/tasks";
+
 type LeaderboardRow = { version: number; accuracy: number };
 
-export function CorrectnessCurve() {
+export function CorrectnessCurve({ activeTask }: { activeTask: TaskName }) {
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
+  // Reset the rows during render when the task switches, so the previous task's
+  // curve never lingers while the first poll for the new task is in flight. This
+  // render-phase reset (the React-recommended "adjust state on prop change"
+  // pattern) avoids a clearing setState inside the effect body.
+  const [rowsTask, setRowsTask] = useState<TaskName>(activeTask);
+  if (rowsTask !== activeTask) {
+    setRowsTask(activeTask);
+    setRows([]);
+  }
 
   useEffect(() => {
     let alive = true;
     const poll = async () => {
       try {
-        const res = await fetch("/api/leaderboard", { cache: "no-store" });
+        const res = await fetch(
+          `/api/leaderboard?task=${encodeURIComponent(activeTask)}`,
+          { cache: "no-store" },
+        );
         const data = (await res.json()) as LeaderboardRow[];
         if (alive && Array.isArray(data)) setRows(data);
       } catch {
@@ -37,7 +53,7 @@ export function CorrectnessCurve() {
       alive = false;
       clearInterval(t);
     };
-  }, []);
+  }, [activeTask]);
 
   const data = useMemo(
     () =>

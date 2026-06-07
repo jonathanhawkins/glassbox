@@ -13,6 +13,8 @@ import "tldraw/tldraw.css";
 
 import type { GlassboxEvent } from "@glassbox/contract";
 import { toMail, type MailMessage, type SkillState } from "@/lib/cockpit/types";
+import { DEFAULT_TASK, TASK_GOALS, type TaskName } from "@/lib/cockpit/tasks";
+import { ActiveTaskProvider } from "@/lib/cockpit/ActiveTaskContext";
 
 import { BoardController } from "@/lib/cockpit/board";
 import { RoutingEdges } from "@/lib/cockpit/RoutingEdges";
@@ -72,7 +74,13 @@ const TL_COMPONENTS: TLComponents = {
 
 export default function CockpitBoard() {
   const controllerRef = useRef<BoardController | null>(null);
-  const [goal, setGoal] = useState<string>("port the BPE tokenizer to Rust");
+  // The active build target. Owned here so the launch controls, the curve, and
+  // the planner-skill strip all run against (and refetch for) the same task.
+  const [activeTask, setActiveTask] = useState<TaskName>(DEFAULT_TASK);
+  // Bumped once the controller mounts so the per-task hydration effect (below)
+  // can run against it (and re-run on every task switch).
+  const [controllerReady, setControllerReady] = useState(0);
+  const [goal, setGoal] = useState<string>(TASK_GOALS[DEFAULT_TASK]);
   const [version, setVersion] = useState<number>(1);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [events, setEvents] = useState<GlassboxEvent[]>([]);
@@ -99,8 +107,13 @@ export default function CockpitBoard() {
     controller.onSkill = (s) => setSkill(s);
     controller.layout();
     controllerRef.current = controller;
+    // Signal the per-task hydration effect that the controller exists. The
+    // leaderboard + skill hydration lives there (keyed on activeTask) so it
+    // re-runs for the right task on load and on every switch.
+    setControllerReady((n) => n + 1);
 
-    // Hydrate the existing board + curve so a reload mid-run is not blank.
+    // Hydrate the existing board (task-independent) so a reload mid-run is not
+    // blank. The curve + skill are hydrated per task in the effect below.
     void (async () => {
       try {
         const res = await fetch("/api/beads", { cache: "no-store" });
@@ -108,29 +121,6 @@ export default function CockpitBoard() {
         controller.hydrateBeads(snapshot);
       } catch {
         // empty board is fine
-      }
-      let lastVersion = 1;
-      let lastAccuracy: number | null = null;
-      try {
-        const res = await fetch("/api/leaderboard", { cache: "no-store" });
-        const rows = (await res.json()) as { version: number; accuracy: number }[];
-        if (Array.isArray(rows) && rows.length) {
-          const last = rows[rows.length - 1];
-          lastVersion = last.version;
-          lastAccuracy = last.accuracy;
-          setVersion(last.version);
-          setAccuracy(last.accuracy);
-        }
-      } catch {
-        // no curve yet is fine
-      }
-      try {
-        const res = await fetch("/api/skill", { cache: "no-store" });
-        const data = (await res.json()) as { covered?: string[] };
-        const covered = Array.isArray(data?.covered) ? data.covered : [];
-        controller.hydrateSkill(covered, lastVersion, lastAccuracy);
-      } catch {
-        // no skill snapshot yet is fine
       }
       // Hydrate the full mail thread once. Assumes the live SSE is forward-only
       // (it tails new events from "$"), so hydrate and live never overlap and no
@@ -152,6 +142,63 @@ export default function CockpitBoard() {
       controllerRef.current = null;
     };
   }, []);
+
+  // Hydrate the curve readout + planner-skill strip for the ACTIVE task: on mount
+  // (once the controller exists) and again whenever the task switches. Fetches the
+  // task's leaderboard (last row -> header version/accuracy) and its skill mirror
+  // (order/unit/covered -> which tiles render and their coverage), so switching
+  // tasks immediately reframes the strip to the new task's groups instead of
+  // carrying the previous task's coverage. The live SSE then keeps it climbing.
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!controller) return;
+    let cancelled = false;
+    void (async () => {
+      let lastVersion = 1;
+      let lastAccuracy: number | null = null;
+      try {
+        const res = await fetch(
+          `/api/leaderboard?task=${encodeURIComponent(activeTask)}`,
+          { cache: "no-store" },
+        );
+        const rows = (await res.json()) as { version: number; accuracy: number }[];
+        if (!cancelled && Array.isArray(rows) && rows.length) {
+          const last = rows[rows.length - 1];
+          lastVersion = last.version;
+          lastAccuracy = last.accuracy;
+          setVersion(last.version);
+          setAccuracy(last.accuracy);
+        } else if (!cancelled) {
+          // No runs for this task yet: reset the header so it does not show the
+          // previous task's score.
+          setVersion(1);
+          setAccuracy(null);
+        }
+      } catch {
+        // no curve yet is fine
+      }
+      try {
+        const res = await fetch(
+          `/api/skill?task=${encodeURIComponent(activeTask)}`,
+          { cache: "no-store" },
+        );
+        const data = (await res.json()) as {
+          covered?: string[];
+          order?: string[];
+          unit?: string;
+        };
+        if (cancelled) return;
+        const covered = Array.isArray(data?.covered) ? data.covered : [];
+        const order = Array.isArray(data?.order) ? data.order : undefined;
+        controller.hydrateSkill(covered, lastVersion, lastAccuracy, order, data?.unit);
+      } catch {
+        // no skill snapshot yet is fine
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTask, controllerReady]);
 
   // Single EventSource subscription for the whole board.
   useEffect(() => {
@@ -206,13 +253,23 @@ export default function CockpitBoard() {
     };
   }, []);
 
-  // Mirror mailOpen into a ref for the SSE callback, and clear unread on open.
+  // Mirror mailOpen into a ref for the SSE callback (which closes over initial
+  // state and reads the live value from the ref).
   useEffect(() => {
     mailOpenRef.current = mailOpen;
-    if (mailOpen) setMailUnread(0);
   }, [mailOpen]);
 
+  // Clear the unread badge the moment the drawer opens. Done as a render-phase
+  // reset on the closed -> open transition (the React-recommended "adjust state
+  // on prop/state change" pattern) instead of a setState inside an effect.
+  const [mailWasOpen, setMailWasOpen] = useState(false);
+  if (mailWasOpen !== mailOpen) {
+    setMailWasOpen(mailOpen);
+    if (mailOpen) setMailUnread(0);
+  }
+
   return (
+    <ActiveTaskProvider value={activeTask}>
     <div className="relative h-full w-full overflow-hidden bg-[#060a14]">
       {/* The locked, programmatic tldraw canvas. */}
       <div className="absolute inset-0">
@@ -343,10 +400,10 @@ export default function CockpitBoard() {
           (the chat's manual fallback), and the live event strip filling the rest. */}
       <aside className="pointer-events-none absolute bottom-5 right-5 top-28 z-20 flex w-[360px] flex-col gap-3">
         <div className="pointer-events-auto h-[200px] shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
-          <CorrectnessCurve />
+          <CorrectnessCurve activeTask={activeTask} />
         </div>
         <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
-          <LaunchControls />
+          <LaunchControls activeTask={activeTask} onTaskChange={setActiveTask} />
         </div>
         <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
           <Legend />
@@ -360,7 +417,7 @@ export default function CockpitBoard() {
       {/* Planner skill evolution strip: the self-improvement made visible. */}
       {skill && (
         <div className="pointer-events-none absolute bottom-5 left-1/2 z-20 w-[min(560px,44vw)] -translate-x-1/2">
-          <PlannerSkillPanel skill={skill} />
+          <PlannerSkillPanel skill={skill} activeTask={activeTask} />
         </div>
       )}
 
@@ -371,5 +428,6 @@ export default function CockpitBoard() {
         onClose={() => setMailOpen(false)}
       />
     </div>
+    </ActiveTaskProvider>
   );
 }

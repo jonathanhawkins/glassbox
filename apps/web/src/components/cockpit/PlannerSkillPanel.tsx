@@ -1,29 +1,35 @@
 "use client";
 
-// PLANNER SKILL strip: the self-improvement made visible. Seven capability tiles
-// (one per scoring category, in canonical climb order) light up left to right as
-// the planner skill grows. Each still-failing tile shows HOW MANY lines the Weave
-// eval flagged (the real, per-run signal the improver prioritizes on); the
-// biggest gap pulses red, and the category the improver just added pops green.
-// Driven by the board's skill state (the live event stream + /api/skill hydrate),
-// so it climbs in lockstep with the correctness curve and is never scripted.
+// PLANNER SKILL strip: the self-improvement made visible. One tile per scoring
+// group of the ACTIVE task (the tokenizer's 7 input categories, or the kata's 4
+// test modules), in the task's canonical climb order, lighting up left to right
+// as the planner skill grows. Each still-failing tile shows HOW MANY lines the
+// Weave eval flagged (the real, per-run signal the improver prioritizes on); the
+// biggest gap pulses red, and the group the improver just added pops green.
+// Driven by the board's skill state (the live event stream + /api/skill?task=
+// hydrate), so it climbs in lockstep with the correctness curve and is never
+// scripted. The group order/colors/labels are task-agnostic: the tile set comes
+// from skill.order, and groupColor/groupLabel keep the tokenizer palette while
+// deriving stable colors/labels for any other task's groups.
 
 import { useState } from "react";
 
-import {
-  CAP_COLORS,
-  CAP_LABELS,
-  CATEGORY_ORDER,
-  type Capability,
-  type SkillState,
-} from "@/lib/cockpit/types";
+import { groupColor, groupLabel, type SkillState } from "@/lib/cockpit/types";
 
 import { SkillViewerDrawer } from "./SkillViewerDrawer";
 
-export function PlannerSkillPanel({ skill }: { skill: SkillState }) {
+export function PlannerSkillPanel({
+  skill,
+  activeTask,
+}: {
+  skill: SkillState;
+  activeTask: import("@/lib/cockpit/tasks").TaskName;
+}) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const covered = new Set(skill.covered);
-  const total = CATEGORY_ORDER.length;
+  const order = skill.order;
+  const total = order.length;
+  const unit = skill.unit || "category";
   const gap = skill.lastGap?.category ?? null;
   const added = skill.lastAdded;
   const failingMap = new Map(skill.failing.map((f) => [f.category, f.failed]));
@@ -37,12 +43,12 @@ export function PlannerSkillPanel({ skill }: { skill: SkillState }) {
     narration = `Weave eval: ${gap} is the biggest gap${
       gapCount ? ` (${gapCount} lines failing)` : ""
     }, rewriting the skill`;
-  } else if (covered.size >= total) {
-    narration = "full coverage: all 7 input categories pass the oracle";
+  } else if (total > 0 && covered.size >= total) {
+    narration = `full coverage: all ${total} ${unit}s pass the oracle`;
   } else if (skill.failing.length) {
-    narration = "eval found gaps, rebuilding the skill one category at a time";
+    narration = `eval found gaps, rebuilding the skill one ${unit} at a time`;
   } else {
-    narration = "the planner skill grows one category per Weave eval";
+    narration = `the planner skill grows one ${unit} per Weave eval`;
   }
 
   return (
@@ -79,11 +85,11 @@ export function PlannerSkillPanel({ skill }: { skill: SkillState }) {
       </div>
 
       <div className="flex items-stretch gap-1.5">
-        {CATEGORY_ORDER.map((cat) => {
+        {order.map((cat) => {
           const isCovered = covered.has(cat);
           const isGap = !isCovered && gap === cat;
           const isAdded = added === cat;
-          const color = CAP_COLORS[cat as Capability];
+          const color = groupColor(cat);
           const failed = !isCovered ? failingMap.get(cat) : undefined;
           return (
             <div
@@ -129,7 +135,7 @@ export function PlannerSkillPanel({ skill }: { skill: SkillState }) {
                       : "text-slate-500"
                 }`}
               >
-                {CAP_LABELS[cat as Capability]}
+                {groupLabel(cat)}
               </span>
               <span
                 className={`text-[8px] leading-none tabular-nums ${
@@ -152,7 +158,11 @@ export function PlannerSkillPanel({ skill }: { skill: SkillState }) {
       </div>
     </div>
 
-      <SkillViewerDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      <SkillViewerDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        activeTask={activeTask}
+      />
     </>
   );
 }
