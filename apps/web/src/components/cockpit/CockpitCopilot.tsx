@@ -32,24 +32,33 @@ import type { CSSProperties, ReactElement } from "react";
 import "@copilotkit/react-core/v2/styles.css";
 
 import { CopilotActions } from "./CopilotActions";
+import { useActiveTask } from "@/lib/cockpit/ActiveTaskContext";
+import { TASK_GOALS, type TaskName } from "@/lib/cockpit/tasks";
 
-const SYSTEM_INSTRUCTIONS = [
-  "You are Glassbox mission control: the operator's copilot for a self-improving agent swarm that ports a BPE tokenizer to Rust and grades itself against a hard oracle (exact token-id match).",
-  "To start a build, call the launch tools. Do not just describe what you would do, actually call the tool.",
-  "Use launchClimb for the genuine self-improvement loop run immediately (the headline demo): 'port the BPE tokenizer to Rust', 'improve', 'climb', 'run the loop', 'just run it', or 'go' should call launchClimb.",
-  "Use proposeImprovement (human in the loop) when the operator wants to review or sign off before anything runs: 'propose the next improvement', 'what should we do next', or 'ask me before you run'. It renders an approval card and waits; approval launches the climb, so do not also call launchClimb.",
-  "Use launchRun for a single full-plan one-shot run, and launchLive for the spot-a-gap inject beat where the swarm catches and patches a missing capability mid-run.",
-  "To show progress, render the charts: call showCorrectnessCurve to draw the climbing accuracy curve in the chat, and showLeaderboard to show the per-version accuracy table.",
-  "Keep replies short and concrete. After launching, tell the operator to watch the board and the curve climb.",
-].join(" ");
+// Operating instructions for the model, grounded on the ACTIVE task so the copilot
+// talks about (and triggers a build for) the task the operator selected, not always
+// the tokenizer. The tool-usage rules are task-agnostic; only the goal varies.
+function systemInstructions(task: TaskName): string {
+  const goal = TASK_GOALS[task];
+  return [
+    `You are Glassbox mission control: the operator's copilot for a self-improving agent swarm. The current task is to ${goal}, and the swarm grades itself against a hard, checkable oracle (an exact-match diff or a real test suite).`,
+    "To start a build, call the launch tools. Do not just describe what you would do, actually call the tool.",
+    `Use launchClimb for the genuine self-improvement loop run immediately (the headline demo): '${goal}', 'improve', 'climb', 'run the loop', 'just run it', or 'go' should call launchClimb.`,
+    "Use proposeImprovement (human in the loop) when the operator wants to review or sign off before anything runs: 'propose the next improvement', 'what should we do next', or 'ask me before you run'. It renders an approval card and waits; approval launches the climb, so do not also call launchClimb.",
+    "Use launchRun for a single full-plan one-shot run, and launchLive for the spot-a-gap inject beat where the swarm catches and patches a missing capability mid-run.",
+    "To show progress, render the charts: call showCorrectnessCurve to draw the climbing accuracy curve in the chat, and showLeaderboard to show the per-version accuracy table.",
+    "Keep replies short and concrete. After launching, tell the operator to watch the board and the curve climb.",
+  ].join(" ");
+}
 
 // Mission steering for the model. In v2 there is no system-prompt prop on the
 // chat, so the operating instructions are injected as agent context (the model
-// sees this alongside the tool descriptions).
+// sees this alongside the tool descriptions). Re-injected when the task switches.
 function MissionContext() {
+  const task = useActiveTask();
   useAgentContext({
     description: "Glassbox mission control operating instructions",
-    value: SYSTEM_INSTRUCTIONS,
+    value: systemInstructions(task),
   });
   return null;
 }
@@ -58,14 +67,17 @@ function MissionContext() {
 // what the copilot (and the SDK) can do: launch, human-in-the-loop approval,
 // and generative-UI charts.
 function Suggestions() {
+  // The first chip follows the active task's goal (Port the BPE tokenizer to Rust /
+  // Build the textkit Python library); the other two are task-agnostic. Re-configured
+  // on task switch via the [task] dep.
+  const task = useActiveTask();
+  const goal = TASK_GOALS[task];
+  const goalTitle = goal.charAt(0).toUpperCase() + goal.slice(1);
   useConfigureSuggestions(
     {
       available: "before-first-message",
       suggestions: [
-        {
-          title: "Port the BPE tokenizer to Rust",
-          message: "Port the BPE tokenizer to Rust",
-        },
+        { title: goalTitle, message: goal },
         {
           title: "Propose the next improvement",
           message: "Propose the next improvement and ask me to approve it",
@@ -76,7 +88,7 @@ function Suggestions() {
         },
       ],
     },
-    [],
+    [task],
   );
   return null;
 }

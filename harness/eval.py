@@ -8,7 +8,7 @@ general, task-aware Weave Evaluation over the checkable evaluator. Do not run it
 against the current binary until then.
 
 What this does, end to end:
-  1. Load .env and init Weave at whitely-white-elk-llc/glassbox (entity qualified;
+  1. Load .env and init Weave at white-elk-llc/glassbox (entity qualified;
      a bare "glassbox" fails with an entity error).
   2. Build an @weave.op predict(text) -> ids that shells the Rust tokenizer, so a
      real Weave trace exists for the run.
@@ -51,7 +51,7 @@ from harness.oracle import (  # noqa: E402
 # the oracle anyway; the Evaluation is for the per example traces in the UI).
 EVAL_SAMPLE_SIZE = 40
 
-WEAVE_ENTITY = "whitely-white-elk-llc"
+WEAVE_ENTITY = "white-elk-llc"
 WEAVE_PROJECT_NAME = "glassbox"
 WEAVE_PROJECT = f"{WEAVE_ENTITY}/{WEAVE_PROJECT_NAME}"
 

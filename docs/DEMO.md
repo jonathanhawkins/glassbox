@@ -25,7 +25,7 @@ not show:
 pnpm --filter web build && pnpm --filter web start   # cockpit :3100, no dev overlay
 ```
 
-Have the Weave project open in a tab: https://wandb.ai/whitely-white-elk-llc/glassbox/weave
+Have the Weave project open in a tab: https://wandb.ai/white-elk-llc/glassbox/weave
 
 ## Script
 
