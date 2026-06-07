@@ -292,17 +292,19 @@ def plan(
     base_spec = _plan_from_coverage(covered, allowed_caps=allowed_caps)
     required_caps = {b["capability"] for b in base_spec}
 
-    # By default we use the canonical SKILL titles (base_spec) so beads are
-    # created instantly. The LLM only ever phrases titles (the cap SET is
-    # deterministic), so the ~10s LLM call is opt-in: set GLASSBOX_PLANNER_LLM
-    # to 1/true/yes to let the LLM phrase the beads (still validated to EXACTLY
-    # the required cap set, falling back to base_spec if it returns None).
+    # The LLM genuinely phrases and structures the decomposition for the required
+    # capability set. The cap SET stays a function of the SKILL coverage (so the
+    # curve is never at the LLM's whim), but which titles/order/deps the plan uses
+    # is the model's. On by default; set GLASSBOX_PLANNER_LLM=0 for the instant
+    # canonical titles (a fast live board). The LLM plan is validated to EXACTLY the
+    # required cap set, falling back to base_spec if it returns None.
     spec = base_spec
     source = "skill-canonical"
-    if os.environ.get("GLASSBOX_PLANNER_LLM", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
+    if os.environ.get("GLASSBOX_PLANNER_LLM", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "",
     ):
         llm_spec = _plan_from_llm(goal, required_caps)
         if llm_spec is not None:
