@@ -26,6 +26,7 @@ import { LaunchControls } from "./LaunchControls";
 import { AgentMailDrawer } from "./AgentMailDrawer";
 import { Legend } from "./Legend";
 import { PlannerSkillPanel } from "./PlannerSkillPanel";
+import { CodeDrawer } from "./CodeDrawer";
 
 // The CopilotKit command bar is client-only (GraphQL client + chat widget that
 // touch the browser), so it is loaded with { ssr: false }. The board + buttons
@@ -94,6 +95,7 @@ export default function CockpitBoard() {
   }, [copilotOpen]);
   const [messages, setMessages] = useState<MailMessage[]>([]);
   const [mailOpen, setMailOpen] = useState(false);
+  const [codeOpen, setCodeOpen] = useState(false);
   const [mailUnread, setMailUnread] = useState(0);
   // Read inside the SSE callback (which closes over initial state) to decide
   // whether an arriving message should bump the unread badge.
@@ -333,6 +335,17 @@ export default function CockpitBoard() {
               </span>
             )}
           </button>
+          <button
+            type="button"
+            onClick={() => setCodeOpen(true)}
+            title="Workspace code: the real source the swarm wrote, version by version"
+            className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5 text-center backdrop-blur transition-colors hover:bg-emerald-500/10"
+          >
+            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+              code
+            </div>
+            <div className="text-sm font-semibold text-emerald-300">source</div>
+          </button>
           <div className="rounded-xl border border-slate-700/60 bg-slate-900/70 px-3 py-1.5 text-center backdrop-blur">
             <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
               planner
@@ -429,6 +442,13 @@ export default function CockpitBoard() {
         open={mailOpen}
         messages={messages}
         onClose={() => setMailOpen(false)}
+      />
+
+      {/* Workspace code: the real source the swarm wrote, step v1..vN. */}
+      <CodeDrawer
+        open={codeOpen}
+        onClose={() => setCodeOpen(false)}
+        activeTask={activeTask}
       />
     </div>
     </ActiveTaskProvider>

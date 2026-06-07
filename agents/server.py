@@ -139,6 +139,69 @@ def _snapshot_skill(cfg: Any = None) -> dict[str, Any]:
     }
 
 
+def _snapshot_workspace(task: Any) -> dict[str, Any]:
+    """Build a task's workspace-code mirror: the live source files plus every
+    per-version snapshot (history/v{n}/), so the cockpit can step v1..vN and watch
+    the real code the swarm wrote grow.
+
+    ``current`` maps each edit_target (rel path) to the live file (the finished,
+    restored source at rest). ``versions[].files`` maps the same rel paths to the
+    source at that version. Per-version ``covered`` (from the skill history) and
+    ``accuracy`` (from the leaderboard) are correlated by version number for labels.
+    Best effort: every read degrades to empty, never raises.
+    """
+    from pathlib import Path
+
+    targets = list(getattr(task, "edit_targets", []) or [])
+    cfg = getattr(task, "skill", None) or skill.TOKENIZER
+    current = {rel: task.read_target(rel) for rel in targets}
+
+    covered_by_v: dict[int, list[str]] = {}
+    try:
+        for entry in skill.history(cfg):
+            covered_by_v[int(entry["version"])] = entry.get("covered", [])
+    except Exception as exc:  # noqa: BLE001 - labels are best effort
+        print(f"[workspace] skill.history failed: {exc}")
+    acc_by_v: dict[int, float] = {}
+    try:
+        for version, accuracy in bus.get_leaderboard(getattr(task, "name", "tokenizer")):
+            acc_by_v[int(version)] = float(accuracy)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[workspace] leaderboard failed: {exc}")
+
+    versions: list[dict[str, Any]] = []
+    hist = getattr(task, "history_dir", None)
+    if hist and Path(hist).is_dir():
+        vdirs: list[tuple[int, Path]] = []
+        for child in Path(hist).iterdir():
+            if child.is_dir() and child.name.startswith("v") and child.name[1:].isdigit():
+                vdirs.append((int(child.name[1:]), child))
+        for n, vdir in sorted(vdirs):
+            files: dict[str, str] = {}
+            for rel in targets:
+                p = vdir / rel
+                if p.exists():
+                    try:
+                        files[rel] = p.read_text(encoding="utf-8")
+                    except OSError:
+                        files[rel] = ""
+            entry: dict[str, Any] = {"version": n, "files": files}
+            if n in covered_by_v:
+                entry["covered"] = covered_by_v[n]
+            if n in acc_by_v:
+                entry["accuracy"] = acc_by_v[n]
+            versions.append(entry)
+
+    return {
+        "ts": int(time.time() * 1000),
+        "task": getattr(task, "name", ""),
+        "edit_targets": targets,
+        "unit": cfg.unit,
+        "current": current,
+        "versions": versions,
+    }
+
+
 def _poll_loop() -> None:
     """Mirror the bead graph to Redis every POLL_INTERVAL_S.
 
@@ -392,6 +455,17 @@ def get_skill(task: str = "tokenizer") -> dict[str, Any]:
     """
     cfg = _require_task(task).skill or skill.TOKENIZER
     return _snapshot_skill(cfg)
+
+
+@app.get("/workspace")
+def get_workspace(task: str = "tokenizer") -> dict[str, Any]:
+    """Return the task's workspace source: the live files plus every per-version
+    snapshot, so the cockpit can show the real code the swarm wrote and step v1..vN.
+
+    Shape: {ts, task, edit_targets, unit, current: {rel: text},
+    versions: [{version, files: {rel: text}, covered, accuracy}]}.
+    """
+    return _snapshot_workspace(_require_task(task))
 
 
 @app.post("/reset")

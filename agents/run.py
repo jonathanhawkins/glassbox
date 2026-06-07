@@ -243,6 +243,9 @@ def improve_loop(
     # regardless of what a previous session left on disk.
     skill.reset_to_baseline(task.skill)
     skill.snapshot(1, cfg=task.skill)
+    # Clear any prior climb's per-version code snapshots so the code viewer shows
+    # only this climb's v1..vN (the analog of the skill history reset above).
+    task.reset_workspace_history()
 
     base = run_base if run_base and run_base != "auto" else _auto_base("improve")
     cap = max(1, int(max_versions))

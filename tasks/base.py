@@ -121,6 +121,25 @@ class Task:
             shutil.copyfile(src, out)
         return dest
 
+    def reset_workspace_history(self) -> int:
+        """Delete every history/v{n}/ source snapshot. Returns how many were removed.
+
+        Called at the start of a climb so the code viewer never shows a stale tail
+        from a previous, longer climb (the analog of skill.reset_history). Best
+        effort: only ``v<digits>`` dirs are touched and a failed remove is skipped.
+        """
+        if not self.history_dir or not self.history_dir.is_dir():
+            return 0
+        removed = 0
+        for child in self.history_dir.iterdir():
+            if child.is_dir() and child.name.startswith("v") and child.name[1:].isdigit():
+                try:
+                    shutil.rmtree(child)
+                    removed += 1
+                except OSError:
+                    pass
+        return removed
+
     # ----- build + grade -----
 
     def build(self) -> tuple[bool, str]:
