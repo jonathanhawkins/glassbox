@@ -40,6 +40,14 @@ HISTORY_DIR = Path(__file__).resolve().parent / "history"
 GROUPS = ["ascii", "punctuation", "numbers", "code", "unicode", "whitespace", "emoji"]
 FOUNDATIONAL = "ascii"
 
+# code and emoji add NO regex branch of their own: once the symbol-run branch from
+# punctuation exists, code markers and emoji (both symbol runs) tokenize exactly. We
+# keep them as named scoring groups (the corpus and the cockpit tiles show them), but
+# they are "free" - covering them rewrites no source and moves no score, so the
+# converged plan reaches 1.0 once the five branch-adding groups (ascii, punctuation,
+# numbers, unicode, whitespace) are present, with code/emoji already green.
+FREE_GROUPS = {"code", "emoji"}
+
 GOAL = (
     "Implement the gpt2 BPE pretokenizer in Rust (tokenizer-rs/src/pretok.rs) so the "
     "tokenizer reproduces tiktoken gpt2 token ids exactly across the fixture corpus "
@@ -121,6 +129,7 @@ def build_task() -> Task:
         ],
         build_cwd=ROOT,
         groups=GROUPS,
+        free_groups=FREE_GROUPS,
         skill=TOKENIZER_SKILL,
         reset_fn=_reset,
         apply_groups_fn=_apply,

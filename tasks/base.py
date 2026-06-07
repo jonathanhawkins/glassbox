@@ -54,6 +54,14 @@ class Task:
     # Known group order for stable cockpit/improver ordering (input categories for
     # the tokenizer, test modules for pytest). Optional.
     groups: list[str] = field(default_factory=list)
+    # Scoring groups that add no INDEPENDENT capability: they are delivered by a
+    # branch/feature another group already provides (e.g. the tokenizer's code and
+    # emoji ride on the symbol-run regex branch that punctuation adds), so they pass
+    # before being explicitly covered. The live demo beat manufactures its gap from
+    # score-moving groups only, so injecting a bead always moves the number; the rest
+    # of the pipeline treats these as normal scoring groups. Empty for tasks whose
+    # groups are all independent (e.g. textkit).
+    free_groups: set[str] = field(default_factory=set)
     # The planner-skill config for this task (ordered groups, foundational and
     # structural tags, bead titles, and skill/baseline/history paths). The
     # planner/improver read it; defaults to the tokenizer skill when unset.
@@ -67,6 +75,15 @@ class Task:
     apply_groups_fn: Optional[Callable[[set[str]], None]] = None
     restore_fn: Optional[Callable[[], None]] = None
     history_dir: Optional[Path] = None
+    # "curated" (ships a baked reference + deterministic safety net) or "byo"
+    # (bring-your-own-repo: the swarm fixes a real repo with only the LLM, no
+    # fallback). The cockpit and the worker branch on this.
+    kind: str = "curated"
+    # BYO only: globs (workspace-relative) the worker MAY edit, and the test
+    # files/dirs that are READ-ONLY to workers (the anti-gaming guard). Empty for
+    # curated tasks, which gate edits via edit_targets/group_targets instead.
+    edit_globs: list[str] = field(default_factory=list)
+    test_paths: list[str] = field(default_factory=list)
 
     def __repr__(self) -> str:
         # Keep Weave op traces clean: a Task holds callables + an Evaluator, so the
@@ -89,6 +106,10 @@ class Task:
         and the history snapshots, so restoring the live file loses nothing. Called
         in a finally after a top-level run and by /reset.
         """
+        # BYO tasks have no reference to restore to: the sandbox is a disposable
+        # clone, so "restore" is a no-op (cleanup is rmtree of the sandbox).
+        if self.kind == "byo":
+            return
         if self.restore_fn is not None:
             self.restore_fn()
         elif self.apply_groups_fn is not None and self.groups:

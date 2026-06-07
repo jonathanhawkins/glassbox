@@ -274,6 +274,26 @@ class ResetRequest(BaseModel):
     task: str = "tokenizer"
 
 
+class BYORequest(BaseModel):
+    # Bring-your-own-repo: point the swarm at a real repo and make its failing tests
+    # pass. Only pytest is supported for the demo.
+    repo: str
+    goal: str = "Make the failing tests pass."
+    test: str = "pytest"
+    test_args: Optional[list[str]] = None
+    edit: Optional[list[str]] = None  # editable globs (default ["**/*.py"])
+    tests: Optional[list[str]] = None  # read-only test dirs (default ["tests","test"])
+    label: Optional[str] = None
+    max_rounds: int = 4
+
+
+# Cache of built BYO tasks (keyed by their generated id) and their cockpit metadata.
+# A BYO task is expensive to build (clone + discover groups), so it is built once in
+# the background and reused by every /skill, /workspace, /leaderboard, /loop request.
+_BYO_TASKS: dict[str, Any] = {}
+_BYO_META: dict[str, dict[str, Any]] = {}
+
+
 # Only one swarm op may run at a time: the workspace source (e.g.
 # tokenizer-rs/src/pretok.rs) and the build target are SHARED, so overlapping runs
 # would race on the source file and grade each other's binary. The lock is held for
@@ -315,12 +335,24 @@ def _restore_quietly(task) -> None:
         print(f"[run] restore_workspace failed: {exc}")
 
 
+def _resolve_task(name: str):
+    """Resolve a task name to a built Task: a cached BYO task first, else load_task.
+
+    BYO tasks are not in the static registry (they are created at runtime from a
+    repo), so they live in _BYO_TASKS keyed by their generated id.
+    """
+    from tasks import load_task
+
+    if name in _BYO_TASKS:
+        return _BYO_TASKS[name]
+    return load_task(name)
+
+
 def _run_cycle_bg(task_name: str, goal: str, run_id: str, planner_version: int) -> None:
     # Imported lazily so importing the server never triggers weave.init.
     from . import run as run_module
-    from tasks import load_task
 
-    task = load_task(task_name)
+    task = _resolve_task(task_name)
     try:
         run_module.run_cycle(task, goal, run_id, planner_version=planner_version)
     except Exception as exc:  # noqa: BLE001 - surface in logs, do not crash server
@@ -331,9 +363,8 @@ def _run_cycle_bg(task_name: str, goal: str, run_id: str, planner_version: int) 
 
 def _improve_loop_bg(task_name: str, goal: str, run_base: str, max_versions: int) -> None:
     from . import run as run_module
-    from tasks import load_task
 
-    task = load_task(task_name)
+    task = _resolve_task(task_name)
     try:
         run_module.improve_loop(task, goal, run_base, max_versions=max_versions)
     except Exception as exc:  # noqa: BLE001
@@ -342,11 +373,22 @@ def _improve_loop_bg(task_name: str, goal: str, run_base: str, max_versions: int
         _restore_quietly(task)
 
 
+def _byo_loop_bg(task_name: str, goal: str, run_base: str, max_rounds: int) -> None:
+    from . import run as run_module
+
+    task = _resolve_task(task_name)
+    try:
+        run_module.byo_loop(task, goal, run_base, max_rounds=max_rounds)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[run] byo_loop({run_base}) failed: {exc}")
+    finally:
+        _restore_quietly(task)
+
+
 def _live_bg(task_name: str, goal: str, run_id: str, injections: int) -> None:
     from . import run as run_module
-    from tasks import load_task
 
-    task = load_task(task_name)
+    task = _resolve_task(task_name)
     try:
         run_module.run_cycle_live(task, goal, run_id, injections=injections)
     except Exception as exc:  # noqa: BLE001
@@ -362,9 +404,20 @@ def health() -> dict[str, bool]:
 
 
 def _require_task(name: str):
-    """Load a task by name or raise 404, so an unknown ?task= never 500s."""
+    """Load a task by name or raise 404, so an unknown ?task= never 500s.
+
+    A cached BYO task wins over the static registry. A BYO id that exists in the
+    metadata but is still discovering (not built yet) raises 409 so callers know to
+    wait rather than 404 (which reads as 'unknown').
+    """
     from tasks import available_tasks, load_task
 
+    if name in _BYO_TASKS:
+        return _BYO_TASKS[name]
+    if name in _BYO_META:
+        raise HTTPException(
+            status_code=409, detail=f"task {name!r} is still discovering its groups"
+        )
     try:
         return load_task(name)
     except (ValueError, KeyError):
@@ -372,6 +425,96 @@ def _require_task(name: str):
             status_code=404,
             detail=f"unknown task {name!r} (have: {sorted(available_tasks())})",
         )
+
+
+@app.get("/tasks")
+def get_tasks() -> list[dict[str, Any]]:
+    """List available tasks: the static curated tasks plus any runtime BYO tasks."""
+    from tasks import task_specs
+
+    return task_specs() + list(_BYO_META.values())
+
+
+def _byo_build_bg(task_id: str, cfg: dict[str, Any]) -> None:
+    """Build a BYO task (clone + discover groups) and cache it; flip discovering off.
+
+    Runs off the request thread because cloning and the first eval are slow. On
+    failure the task is marked errored so the cockpit can surface it.
+    """
+    from tasks.byo import build_task
+
+    try:
+        task = build_task(cfg)
+        _BYO_TASKS[task_id] = task
+        meta = _BYO_META.get(task_id, {})
+        meta.update(
+            {
+                "discovering": False,
+                "unit": (task.skill.unit if task.skill else "test"),
+                "groups": list(task.groups),
+            }
+        )
+        _BYO_META[task_id] = meta
+        print(f"[byo] built {task_id}: {len(task.groups)} failing group(s)")
+    except Exception as exc:  # noqa: BLE001
+        meta = _BYO_META.get(task_id, {})
+        meta.update({"discovering": False, "error": str(exc)[:300]})
+        _BYO_META[task_id] = meta
+        print(f"[byo] build {task_id} failed: {exc}")
+
+
+@app.post("/tasks/byo")
+def post_byo(req: BYORequest) -> dict[str, Any]:
+    """Create a bring-your-own-repo task: clone the repo + discover its failing test
+    groups in the background; return the task metadata immediately (discovering)."""
+    if (req.test or "pytest").strip().lower() != "pytest":
+        raise HTTPException(
+            status_code=400, detail="only the pytest test command is supported"
+        )
+    task_id = f"byo-{int(time.time() * 1000)}"
+    label = req.label or req.repo.rstrip("/").split("/")[-1] or task_id
+    meta = {
+        "id": task_id,
+        "label": label,
+        "goal": req.goal,
+        "kind": "byo",
+        "unit": "test",
+        "discovering": True,
+        "repo": req.repo,
+        "test_command": req.test,
+        "editable": ",".join(req.edit) if req.edit else "**/*.py",
+    }
+    _BYO_META[task_id] = meta
+    cfg = {
+        "id": task_id,
+        "repo": req.repo,
+        "goal": req.goal,
+        "test_args": req.test_args,
+        "edit": req.edit,
+        "tests": req.tests,
+        "label": label,
+    }
+    threading.Thread(
+        target=_byo_build_bg, args=(task_id, cfg), name=f"byo-build-{task_id}", daemon=True
+    ).start()
+    return {"ok": True, "task": meta}
+
+
+@app.get("/tasks/{task_id}")
+def get_task_detail(task_id: str) -> dict[str, Any]:
+    """Load one task and return its groups/unit/edit_targets for the cockpit."""
+    import agents.skill as skill
+
+    t = _require_task(task_id)
+    cfg = t.skill or skill.TOKENIZER
+    return {
+        "id": t.name,
+        "goal": t.goal,
+        "kind": getattr(t, "kind", "curated"),
+        "groups": list(t.groups),
+        "unit": cfg.unit,
+        "edit_targets": list(t.edit_targets),
+    }
 
 
 @app.get("/leaderboard")
@@ -421,9 +564,21 @@ def post_loop(req: LoopRequest) -> dict[str, Any]:
     consequence of the skill evolving. The legacy ``versions`` field, if sent, is
     honored as ``max_versions`` for backward compatibility.
     """
-    _require_task(req.task)
+    task_obj = _require_task(req.task)
     max_versions = req.versions if req.versions is not None else req.max_versions
     run_base = f"loop-{int(time.time() * 1000)}"
+    # BYO tasks have no skill to rewrite: run the honest re-attempt loop instead, so
+    # the curve is the live test pass-rate climbing as beads close (no fallback).
+    if getattr(task_obj, "kind", "curated") == "byo":
+        _start_thread(
+            _byo_loop_bg,
+            req.task,
+            req.goal,
+            run_base,
+            max_versions,
+            name=f"byo-{run_base}",
+        )
+        return {"run_base": run_base, "max_rounds": max_versions, "mode": "byo"}
     _start_thread(
         _improve_loop_bg,
         req.task,
@@ -473,20 +628,20 @@ def post_reset(req: ResetRequest = ResetRequest()) -> dict[str, Any]:
     """Clear the live demo state for a clean restart.
 
     Clears the Redis event stream, leaderboard, bead mirror, and per-run caps;
-    closes any ready beads (so the poller does not refill the board with
-    stragglers); and, by default, restores SKILL.md to full coverage so a cold
-    'Launch run' shows the finished tokenizer while 'Run climb' rebuilds it.
+    closes EVERY open bead, blocked stragglers included (so the poller does not
+    refill the board with leftovers from a prior or interrupted run); and, by
+    default, restores SKILL.md to full coverage so a cold 'Launch run' shows the
+    finished tokenizer while 'Run climb' rebuilds it.
     """
     task_obj = _require_task(req.task)
     state = bus.reset_state()
-    closed = 0
+    # Close every not-yet-closed bead, not just the ready ones: ready() misses
+    # blocked stragglers, which the poller would then refill the board with.
+    # close_open() sweeps the whole graph and is best effort per bead.
     try:
-        for b in beads.ready():
-            bid = b.get("id")
-            if bid:
-                beads.close(bid, reason="reset")
-                closed += 1
+        closed = beads.close_open(reason="reset")
     except Exception as exc:  # noqa: BLE001 - reset is best effort
+        closed = 0
         print(f"[reset] bead close skipped: {exc}")
     skill_state = "unchanged"
     if req.reset_skill:

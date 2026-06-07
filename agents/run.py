@@ -146,13 +146,17 @@ def run_cycle(
     """Run one full self-improving cycle and return its summary.
 
     Steps: weave.init (best effort) -> emit run_started + planner working ->
-    planner.plan (creates beads) -> loop while beads.ready(): coordinator claims
-    them and a worker implements each (closing it, accumulating its category) ->
+    close_open (clear stale beads from a prior/interrupted run) -> planner.plan
+    (creates beads) -> loop while beads.ready(): coordinator claims them and a
+    worker implements each (closing it, accumulating its category) ->
     validator.validate (real oracle, leaderboard ZADD) -> emit run_finished.
 
     Returns {planner_version, accuracy, caps, beads, passes}.
     """
     llm.init_weave()
+    # Stamp every event this cycle emits with the build target, so the per-task
+    # cockpit applies only the events for the task it is showing.
+    bus.bind_task(getattr(task, "name", None))
 
     allowed_list = sorted(allowed_caps) if allowed_caps is not None else None
     bus.emit_type(
@@ -164,6 +168,12 @@ def run_cycle(
         payload={"allowed_caps": allowed_list},
     )
     bus.set_agent_status(run_id, "coordinator", "working", planner_version=planner_version)
+
+    # Clear any stale beads (from a prior or interrupted run) BEFORE planning, so the
+    # drain works ONLY this cycle's freshly-planned graph. close_open() sweeps the
+    # whole graph including blocked beads, which ready() would miss; without this,
+    # leftover ready beads get claimed and worked into this run and inflate its score.
+    beads.close_open(reason=f"cleared before {run_id}")
 
     plan = planner.plan(task, goal, run_id, planner_version, allowed_caps=allowed_caps)
     # Map bead id -> capability so the worker gets the right group to author.
@@ -233,6 +243,9 @@ def improve_loop(
     ``version``, ``accuracy``, ``covered``, ``failed_categories``, ``weave_url``.
     """
     llm.init_weave()
+    # Bind the build target for the whole climb so improver rewrites and any
+    # between-cycle events are stamped with this task too (run_cycle re-binds it).
+    bus.bind_task(getattr(task, "name", None))
     weave_url = _weave_url()
 
     # Start a climb with a trim beads WAL so a long run's many bead writes cannot
@@ -246,6 +259,10 @@ def improve_loop(
     # Clear any prior climb's per-version code snapshots so the code viewer shows
     # only this climb's v1..vN (the analog of the skill history reset above).
     task.reset_workspace_history()
+    # Same intent for the leaderboard: drop this task's prior scores + version
+    # metadata so the curve and the ranked panel show ONLY this climb's v1..vN. A
+    # shorter climb must not inherit a longer prior climb's trailing versions.
+    bus.clear_leaderboard(getattr(task, "name", None) or "tokenizer")
 
     base = run_base if run_base and run_base != "auto" else _auto_base("improve")
     cap = max(1, int(max_versions))
@@ -254,14 +271,13 @@ def improve_loop(
     for n in range(1, cap + 1):
         run_id = f"{base}-v{n}"
         covered_before = planner.covered_categories(task.skill)
-        # Clear any leftover beads (from a prior/interrupted run or the previous
-        # version) so this version's drain works ONLY its own freshly-planned graph;
-        # otherwise stale ready beads get worked in and inflate the score.
-        beads.close_open(reason=f"cleared before {run_id}")
-        # Each version builds its plan FRESH from the baseline source, so the genuine
-        # per-bead authoring is coherent (no carry-over from the previous version's
-        # source) and the version's score reflects exactly the skill's current
-        # coverage. The skill (the planner's strategy) is what persists and grows.
+        # run_cycle clears any leftover beads (from a prior/interrupted run or the
+        # previous version) before it plans, so this version's drain works ONLY its
+        # own freshly-planned graph. Each version also builds its plan FRESH from the
+        # baseline source, so the genuine per-bead authoring is coherent (no carry-over
+        # from the previous version's source) and the version's score reflects exactly
+        # the skill's current coverage. The skill (the planner's strategy) is what
+        # persists and grows.
         task.reset_workspace()
         summary = run_cycle(task, goal, run_id, planner_version=n)
         task.snapshot_workspace(n)
@@ -280,13 +296,87 @@ def improve_loop(
                 "weave_url": weave_url,
             }
         )
-        if accuracy >= 1.0:
+        # Stop only when EVERY scoring category is covered (the PRD end state: all
+        # classes listed, oracle 1.0), not merely when accuracy hits 1.0. Some
+        # classes are delivered by a branch another class adds (the tokenizer's
+        # code/emoji ride on punctuation's symbol-run branch), so accuracy can reach
+        # 1.0 while a class is still unlisted; stopping at 1.0 would leave the
+        # converged skill short of full coverage and the cockpit showing a grey tile.
+        if set(planner.covered_categories(task.skill)) >= set(task.groups):
             break
-        # Genuine rewrite: grow the skill to cover the BIGGEST failing gap (from
-        # the eval breakdown), which varies run to run.
+        # Genuine rewrite: grow the skill to cover the BIGGEST failing gap (from the
+        # eval breakdown), which varies run to run; once accuracy is already 1.0,
+        # cover the next still-unlisted class to complete coverage.
         improver.improve(
             task, run_id, n, accuracy, failed_categories=failed, failing=failing
         )
+
+    return summaries
+
+
+@weave.op()
+def byo_loop(
+    task: Any,
+    goal: str,
+    run_base: str = "auto",
+    max_rounds: int = 4,
+) -> list[dict[str, Any]]:
+    """The bring-your-own-repo loop: the curve is the live test pass-rate climbing
+    as beads close, across re-attempt rounds. NO skill rewrite, NO improver, NO
+    deterministic fallback (the worker's BYO branch enforces that).
+
+    Round 1 plans one bead per discovered failing module and drains it. Each later
+    round re-attempts ONLY the still-failing modules (so the model gets fresh tries
+    at what it has not cracked yet), accumulating fixes on the same sandbox. Stops
+    when the suite is green or a round adds no score (fixed point).
+
+    Returns the per-round summaries (version == round number, so the existing curve
+    and leaderboard UI render it unchanged).
+    """
+    llm.init_weave()
+    bus.bind_task(getattr(task, "name", None))
+    bus.clear_leaderboard(getattr(task, "name", None) or "byo")
+
+    base = run_base if run_base and run_base != "auto" else _auto_base("byo")
+    summaries: list[dict[str, Any]] = []
+
+    if not task.groups:
+        # The suite is already green: nothing to fix. Validate once for the record.
+        run_id = f"{base}-v1"
+        result = validator.validate(task, run_id, planner_version=1)
+        return [
+            {
+                "version": 1,
+                "run_id": run_id,
+                "accuracy": float(result.get("accuracy", 1.0)),
+                "failed_categories": [],
+            }
+        ]
+
+    rounds = max(1, int(max_rounds))
+    remaining = list(task.groups)
+    last_acc = -1.0
+    for n in range(1, rounds + 1):
+        run_id = f"{base}-v{n}"
+        # Round 1 plans the full discovered set; later rounds re-attempt only what is
+        # still failing, so the model spends its tries where they are needed.
+        allowed = None if n == 1 else remaining
+        summary = run_cycle(task, goal, run_id, planner_version=n, allowed_caps=allowed)
+        task.snapshot_workspace(n)
+        accuracy = float(summary["accuracy"])
+        remaining = list(summary.get("failed_categories", []))
+        summaries.append(
+            {
+                "version": n,
+                "run_id": run_id,
+                "accuracy": accuracy,
+                "failed_categories": remaining,
+            }
+        )
+        # Stop on green or a fixed point (a round that did not raise the score).
+        if accuracy >= 1.0 or not remaining or accuracy <= last_acc:
+            break
+        last_acc = accuracy
 
     return summaries
 
@@ -317,13 +407,23 @@ def run_cycle_live(
     are added. Honors GLASSBOX_PACE_MS for a watchable board.
     """
     llm.init_weave()
+    # Stamp every event this beat emits with the build target (per-task cockpit).
+    bus.bind_task(getattr(task, "name", None))
 
     full = planner.covered_categories(task.skill)
-    # Drop the top 1-2 covered groups (after the foundational one) to manufacture a
-    # visible gap, but always plan foundational + structural + whatever remains.
-    droppable = [c for c in full if c != task.skill.foundational]
+    # Manufacture the gap from SCORE-MOVING groups only: drop the foundational group
+    # (everything needs it) and any "free" group the task flags as adding no
+    # independent capability (the tokenizer's code/emoji, which punctuation's
+    # symbol-run branch already tokenizes). Injecting a free group back would not move
+    # the number, so excluding them keeps every before/after jump real. The free
+    # groups stay in start_caps (they are already green), so the plan still covers
+    # them.
+    free = set(getattr(task, "free_groups", set()) or set())
+    droppable = [c for c in full if c != task.skill.foundational and c not in free]
+    if not droppable:  # degenerate: everything is foundational/free, fall back
+        droppable = [c for c in full if c != task.skill.foundational]
     k = max(1, min(int(injections), len(droppable)))
-    to_inject = droppable[-k:]  # the highest-index covered cats become the gap
+    to_inject = droppable[-k:]  # the highest-index score-moving cats become the gap
     start_caps = [c for c in full if c not in set(to_inject)]
 
     bus.emit_type(
@@ -337,6 +437,11 @@ def run_cycle_live(
     bus.set_agent_status(
         run_id, "coordinator", "working", planner_version=planner_version
     )
+
+    # Clear any stale beads (from a prior or interrupted run) BEFORE planning, so the
+    # initial drain and the gap injections work only this beat's own graph. As in
+    # run_cycle, close_open() sweeps blocked beads too (ready() would miss them).
+    beads.close_open(reason=f"cleared before {run_id}")
 
     plan = planner.plan(
         task, goal, run_id, planner_version, allowed_caps=start_caps
@@ -465,6 +570,11 @@ def climb_loop(
     Returns the list of per-cycle summaries (one dict per version).
     """
     llm.init_weave()
+    # Stamp every event this loop emits with the build target (per-task cockpit).
+    bus.bind_task(getattr(task, "name", None))
+    # Fresh curve for this climb: drop the task's prior scores + version metadata so
+    # a shorter climb never shows a longer prior climb's trailing versions.
+    bus.clear_leaderboard(getattr(task, "name", None) or "tokenizer")
     v = max(1, int(versions))
     schedule = improver.schedule_for_versions(v)
     summaries: list[dict[str, Any]] = []
@@ -489,6 +599,14 @@ def climb_loop(
                     "added_category": added[0] if added else None,
                     "next_allowed_caps": next_allowed,
                 },
+            )
+            # Persist the added-category half of the next version's leaderboard meta,
+            # for parity with the genuine improve_loop (the validator writes the grade
+            # half when that version is scored).
+            bus.set_planner_meta(
+                getattr(task, "name", "tokenizer"),
+                n + 1,
+                added_category=added[0] if added else None,
             )
     return summaries
 

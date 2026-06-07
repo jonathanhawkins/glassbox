@@ -53,8 +53,8 @@ from .skill import SkillConfig, canonical_title  # noqa: E402
 
 
 def _capabilities(cfg: SkillConfig) -> set[str]:
-    """All allowed capability tags for a task: its scoring groups plus structural."""
-    return cfg.valid() | {cfg.structural}
+    """All allowed capability tags: scoring groups, structural, plus scaffold tags."""
+    return cfg.valid() | {cfg.structural} | cfg.scaffold_tags()
 
 
 def _cfg(task: Any = None) -> SkillConfig:
@@ -77,6 +77,47 @@ def covered_categories(cfg: SkillConfig = skill.TOKENIZER) -> list[str]:
     return skill.covered_categories(cfg)
 
 
+def _plan_with_scaffold(
+    covered: list[str],
+    cfg: SkillConfig,
+    allowed_caps: Optional[Iterable[str]] = None,
+) -> list[dict[str, Any]]:
+    """Build the PRD functional decomposition plus the improver's category beads.
+
+    The plan is the config's functional scaffold (the PRD's component beads, e.g.
+    vocab / byte_encoding / regex_pretok / bpe_merge / special_tokens / encode /
+    decode / harness, wired by their declared deps) followed by one accuracy-bearing
+    category bead per NON-foundational covered group. The foundational category is
+    subsumed by the scaffold (the core pipeline), so the v1 plan is exactly the
+    functional components; the improver then adds a category bead per cycle, each
+    hanging off the scaffold anchor (the regex pre-tokenization component) because
+    every input class is delivered by growing that pattern.
+
+    ``allowed_caps`` (when given) intersects the category beads; the scaffold is
+    always emitted in full so the wiring never breaks.
+    """
+    titles = cfg.scaffold_titles()
+    spec: list[dict[str, Any]] = []
+    for s in cfg.scaffold:
+        deps = [titles[d] for d in s.get("deps", []) if d in titles]
+        spec.append({"title": s["title"], "capability": s["tag"], "deps": deps})
+
+    anchor_title = titles.get(cfg.scaffold_anchor) if cfg.scaffold_anchor else None
+    covered_set = set(covered)
+    cats = [
+        c for c in cfg.order if c in covered_set and c != cfg.foundational
+    ]
+    if allowed_caps is not None:
+        allow = set(allowed_caps)
+        cats = [c for c in cats if c in allow]
+    for cat in cats:
+        deps = [anchor_title] if anchor_title else []
+        spec.append(
+            {"title": canonical_title(cat, cfg), "capability": cat, "deps": deps}
+        )
+    return spec
+
+
 def _plan_from_coverage(
     covered: list[str],
     cfg: SkillConfig,
@@ -84,15 +125,21 @@ def _plan_from_coverage(
 ) -> list[dict[str, Any]]:
     """Build the deterministic bead spec from the coverage set for ``cfg``.
 
-    The spec is exactly: the foundational bead, one bead per covered scoring group,
-    and the structural join bead. Every group bead depends on the foundational one;
-    the structural bead depends on all of them. Titles come from the config's
-    canonical map so deps (wired by title) always line up.
+    When the config carries a functional scaffold (the tokenizer), the plan is the
+    PRD's component decomposition plus the improver's category beads (see
+    ``_plan_with_scaffold``). Otherwise (e.g. textkit) the spec is the legacy shape:
+    the foundational bead, one bead per covered scoring group, and the structural
+    join bead. Every group bead depends on the foundational one; the structural bead
+    depends on all of them. Titles come from the config's canonical map so deps
+    (wired by title) always line up.
 
     ``allowed_caps`` (when given) intersects the covered groups, but the
     foundational and structural beads are always kept, so a caller can request a
     narrower plan without breaking the wiring.
     """
+    if cfg.scaffold:
+        return _plan_with_scaffold(covered, cfg, allowed_caps=allowed_caps)
+
     foundational, structural = cfg.foundational, cfg.structural
     cats = [c for c in cfg.order if c in set(covered)]
     if allowed_caps is not None:
@@ -309,7 +356,12 @@ def plan(
     # required cap set, falling back to base_spec if it returns None.
     spec = base_spec
     source = "skill-canonical"
-    if os.environ.get("GLASSBOX_PLANNER_LLM", "1").strip().lower() not in (
+    # The functional scaffold (the tokenizer) is emitted deterministically so the
+    # PRD dependency shape is guaranteed; the LLM phrasing path is reserved for
+    # tasks without a scaffold (e.g. textkit), where the cap set is flat.
+    if not cfg.scaffold and os.environ.get(
+        "GLASSBOX_PLANNER_LLM", "1"
+    ).strip().lower() not in (
         "0",
         "false",
         "no",

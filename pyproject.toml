@@ -15,10 +15,19 @@ dependencies = [
     "httpx",
     "pydantic",
     "rich",
+    "fastmcp>=3,<4",
 ]
 
 [tool.uv]
 package = false
 
 [dependency-groups]
-dev = []
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+# Collect only the swarm's own tests. Without this, pytest would walk into .venv
+# and the task workspaces (tasks/*/workspace/tests) and try to run their tests.
+testpaths = ["tests"]
+# Put the repo root on sys.path so `import agents` / `import contract` resolve.
+pythonpath = ["."]
+addopts = "-q"

@@ -1,11 +1,13 @@
 """Improver: rewrite the planner SKILL to cover the next failing category.
 
 This is the genuine self-improvement step. The validator grades a run with the
-real tiktoken oracle and reports which input CATEGORIES are still failing. The
-improver:
+real checkable evaluator and logs it as a real weave.Evaluation. The improver:
 
+  0. reads that Evaluation's per-group summary back FROM Weave (PRD section 5.4)
+     and steers on the Weave-graded gaps, falling back to the in-process breakdown
+     the validator handed it if Weave is briefly unavailable (so it never stalls);
   1. reads the SKILL coverage block (the source of truth for what the plan
-     covers) and computes the missing categories (the 7 scoring categories minus
+     covers) and computes the missing categories (the scoring categories minus
      the covered set, or the validator's ``failed_categories``);
   2. picks the highest-impact missing one by the canonical category order;
   3. applies a deterministic coverage edit (skill.add_category, a canonical block)
@@ -43,6 +45,48 @@ import weave  # noqa: E402
 
 from . import bus, llm, skill  # noqa: E402
 from .skill import CATEGORY_ORDER, SkillConfig  # noqa: E402
+from harness import weave_eval  # noqa: E402
+
+
+def _read_weave_enabled() -> bool:
+    """Whether the improver reads its gap signal back from Weave (PRD section 5.4).
+
+    Default on; set GLASSBOX_IMPROVER_READ_WEAVE=0 to force the in-process signal
+    (e.g. fully offline, or to shave the Weave read latency off a snappy live demo).
+    """
+    return os.environ.get("GLASSBOX_IMPROVER_READ_WEAVE", "1").lower() not in (
+        "0", "false", "no", "off", ""
+    )
+
+
+def _failing_from_by_group(
+    by_group: dict[str, Any], covered: Iterable[str], cfg: SkillConfig
+) -> list[dict[str, Any]]:
+    """Reconstruct the validator's failing breakdown from a Weave summary's by_group.
+
+    Mirrors validator._failing_breakdown so a gap sourced FROM Weave is identical in
+    shape and ordering to the in-process one: a {category, failed, total} row for each
+    scoring group NOT yet covered that still has failures, biggest ``failed`` first
+    with the canonical category order as the tiebreak.
+    """
+    covered_set = set(covered)
+    order = list(cfg.order)
+    rows = [
+        {
+            "category": c,
+            "failed": int((v or {}).get("failed", 0)),
+            "total": int((v or {}).get("total", 0)),
+        }
+        for c, v in (by_group or {}).items()
+        if c in order and c not in covered_set and int((v or {}).get("failed", 0)) > 0
+    ]
+    rows.sort(
+        key=lambda f: (
+            -f["failed"],
+            order.index(f["category"]) if f["category"] in order else 99,
+        )
+    )
+    return rows
 
 
 def _cfg(task: Any = None) -> SkillConfig:
@@ -99,6 +143,21 @@ def _fallback_rationale(from_version: int, category: str, accuracy: float) -> st
     return (
         f"the v{from_version} eval showed {category} inputs failing "
         f"(accuracy {accuracy:.2f}), so a bead was added to cover {category}."
+    )
+
+
+def _completeness_rationale(category: str, unit: str = "category") -> str:
+    """Honest rationale for listing a class that already tokenizes correctly.
+
+    Some scoring classes are delivered by a branch added for another class (the
+    tokenizer's emoji/code ride on the symbol-run branch that punctuation adds), so
+    they pass before they are explicitly listed. Adding them completes coverage at
+    100% rather than fixing a failure, and the prose must say exactly that.
+    """
+    return (
+        f"{category} inputs already tokenize correctly (this class is delivered by "
+        f"a branch an earlier {unit} added), so this bead lists {category} to "
+        f"complete coverage of every scoring {unit} with accuracy already at 1.0."
     )
 
 
@@ -214,6 +273,33 @@ def improve(
     text = current_skill(cfg)
     covered_before = skill.parse_coverage(text, cfg)
     failing = list(failing) if failing else []
+
+    # PRD section 5.4: read the gap signal back FROM Weave. The validator logged
+    # this planner version as a real weave.Evaluation (per-group scores + a summary),
+    # so here we read that summary back and steer the rewrite on the Weave-graded
+    # gaps. read_planner_eval flushes pending writes and retries briefly to absorb
+    # Weave's read-after-write latency; if Weave is momentarily unavailable we fall
+    # back to the in-process breakdown the validator handed us, so the climb never
+    # stalls. Toggle with GLASSBOX_IMPROVER_READ_WEAVE.
+    gap_source = "in_process"
+    weave_accuracy: Optional[float] = None
+    if _read_weave_enabled():
+        ws = weave_eval.read_planner_eval(
+            getattr(task, "name", "tokenizer"), planner_version
+        )
+        if isinstance(ws, dict):
+            weave_accuracy = ws.get("accuracy")
+            weave_failing = _failing_from_by_group(
+                ws.get("by_group", {}), covered_before, cfg
+            )
+            if weave_failing:
+                failing = weave_failing
+                gap_source = "weave"
+    print(
+        f"[improver] gap sourced from {'Weave eval' if gap_source == 'weave' else 'in-process breakdown'}"
+        + (f" (v{planner_version} accuracy {weave_accuracy:.2f})" if weave_accuracy is not None else "")
+    )
+
     # Prefer the biggest real gap from the eval (data-driven, varies per run);
     # fall back to the lowest-index missing group when no magnitudes are given.
     if failing:
@@ -232,6 +318,7 @@ def improve(
             "covered": covered_before,
             "gap_categories": [],
             "skill_path": str(cfg.skill_path),
+            "gap_source": gap_source,
         }
 
     # How many lines of the chosen category the eval flagged (for the cockpit's
@@ -241,6 +328,12 @@ def improve(
         0,
     )
 
+    # A "completeness" add: the chosen class has no failing lines (it is already
+    # green, delivered by a branch an earlier class added, e.g. the tokenizer's
+    # code/emoji). We still list it to complete coverage, but the event + rationale
+    # must say so rather than claim a gap that does not exist at accuracy 1.0.
+    completeness = chosen_failed <= 0
+
     # Emit the gap the cockpit animates (planner + improver pulse) BEFORE writing,
     # so the board shows the diagnosis then the rewrite. The payload carries the
     # full per-category breakdown so the UI can show what the eval found.
@@ -249,25 +342,37 @@ def improve(
         run_id,
         planner_version=planner_version,
         agent="improver",
-        title=f"gap: {category} failing (accuracy {accuracy:.2f})",
+        title=(
+            f"completeness: {category} already green, listing for full coverage"
+            if completeness
+            else f"gap: {category} failing (accuracy {accuracy:.2f})"
+        ),
         payload={
             "category": category,
             "accuracy": accuracy,
             "failed": chosen_failed,
+            "completeness": completeness,
             "failing": failing,
+            "gap_source": gap_source,
         },
     )
 
-    # Clean structural edit (deterministic, canonical coverage block) plus an
-    # LLM-authored plain-prose rationale (sanitized), with a templated fallback.
+    # Clean structural edit (deterministic, canonical coverage block) plus a
+    # plain-prose rationale. A genuine gap gets an LLM-authored rationale (templated
+    # fallback); a completeness add gets an honest "already green" rationale, since
+    # asking the model to explain a non-existent failure would only invent one.
     grown = skill.add_category(text, category, cfg)
-    rationale = _llm_rationale(
-        planner_version, category, accuracy, chosen_failed, unit=cfg.unit
-    )
-    rewrite_source = "llm"
-    if rationale is None:
-        rationale = _fallback_rationale(planner_version, category, accuracy)
-        rewrite_source = "deterministic"
+    if completeness:
+        rationale = _completeness_rationale(category, cfg.unit)
+        rewrite_source = "completeness"
+    else:
+        rationale = _llm_rationale(
+            planner_version, category, accuracy, chosen_failed, unit=cfg.unit
+        )
+        rewrite_source = "llm"
+        if rationale is None:
+            rationale = _fallback_rationale(planner_version, category, accuracy)
+            rewrite_source = "deterministic"
     new_text = grown + _rationale_section(next_version, rationale)
 
     # Invariant: the coverage block must parse and must have grown by EXACTLY the
@@ -297,8 +402,21 @@ def improve(
             "covered": covered_after,
             "gap_categories": gap,
             "rewrite_source": rewrite_source,
+            "gap_source": gap_source,
             "snapshot": str(snap_path),
         },
+    )
+
+    # Persist the per-version leaderboard metadata (the category half): annotate the
+    # version this rewrite produces with the category it added, so the cockpit panel
+    # shows "+{category}" on that row. The validator writes the grade half when that
+    # version is later scored; set_planner_meta merges the two.
+    bus.set_planner_meta(
+        getattr(task, "name", "tokenizer"),
+        next_version,
+        added_category=category,
+        gap_source=gap_source,
+        prev_accuracy=accuracy,
     )
 
     bus.emit_mail(
@@ -319,4 +437,5 @@ def improve(
         "covered": covered_after,
         "gap_categories": gap,
         "skill_path": str(cfg.skill_path),
+        "gap_source": gap_source,
     }

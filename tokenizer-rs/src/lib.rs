@@ -3,7 +3,16 @@
 // Mirrors the tiktoken core algorithm:
 //  1. Pretokenize with the gpt2 regex (fancy-regex, same engine tiktoken uses).
 //  2. For each piece, byte_pair_encode over its UTF-8 bytes against the rank map.
-//  3. Concatenate piece outputs in order. No special/BOS/EOS tokens.
+//  3. Concatenate piece outputs in order.
+//
+// Special tokens (the PRD's special-token-handling component) are handled exactly
+// like tiktoken: `encode` is the ORDINARY encoder and treats a special string such
+// as "<|endoftext|>" as plain text (this is what the oracle corpus expects, since
+// fixtures are generated with disallowed_special=()). `encode_with_special` opts a
+// caller in: it splits the text on the allowed special strings, encodes each
+// ordinary span with the BPE pipeline, and emits the special id (e.g. 50256 for
+// <|endoftext|>) in between. So specials are a real, tested feature without
+// perturbing the byte-for-byte oracle match.
 //
 // The pretokenization pattern lives in `pretok::gpt2_pattern` (src/pretok.rs),
 // which is the editable lever the swarm grows: the byte-pair merge below is fixed,
@@ -11,7 +20,7 @@
 // fail the oracle's exact-match. With the full gpt2 pattern, output is
 // byte-for-byte exact (100%).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use base64::Engine as _;
@@ -24,16 +33,34 @@ pub use pretok::gpt2_pattern;
 pub struct Tokenizer {
     /// token bytes -> rank
     ranks: HashMap<Vec<u8>, u32>,
-    /// rank -> token bytes (for decode)
+    /// rank -> token bytes (for decode); also carries special ids
     decoder: HashMap<u32, Vec<u8>>,
     /// gpt2 pretokenization regex
     pattern: Regex,
+    /// special token string -> id (e.g. "<|endoftext|>" -> 50256)
+    special: HashMap<String, u32>,
 }
 
 impl Tokenizer {
-    /// Build a tokenizer from the in memory tiktoken file contents and the
-    /// gpt2 regex pattern string. The pattern is used verbatim.
+    /// Build a tokenizer with no special tokens (the ordinary encoder).
+    ///
+    /// Equivalent to ``new_with_special(.., &[])``; kept as the simple constructor
+    /// for callers (and tests) that do not need special-token handling.
     pub fn new(tiktoken_text: &str, pattern: &str) -> Result<Self, String> {
+        Self::new_with_special(tiktoken_text, pattern, &[])
+    }
+
+    /// Build a tokenizer from the in memory tiktoken file contents, the gpt2 regex
+    /// pattern string (used verbatim), and a special-token table (string -> id).
+    ///
+    /// Special ids are added to the decoder so `decode` round-trips them, but they
+    /// never participate in ordinary `encode` (only `encode_with_special` emits
+    /// them), matching tiktoken's encode_ordinary / encode split.
+    pub fn new_with_special(
+        tiktoken_text: &str,
+        pattern: &str,
+        special: &[(&str, u32)],
+    ) -> Result<Self, String> {
         let mut ranks: HashMap<Vec<u8>, u32> = HashMap::new();
         let mut decoder: HashMap<u32, Vec<u8>> = HashMap::new();
         let b64 = base64::engine::general_purpose::STANDARD;
@@ -59,17 +86,32 @@ impl Tokenizer {
             ranks.insert(bytes.clone(), rank);
             decoder.insert(rank, bytes);
         }
+        // Special tokens: register the string -> id map and make decode round-trip
+        // them by adding their bytes to the decoder. They are NOT inserted into
+        // `ranks`, so ordinary BPE never produces them.
+        let mut special_map: HashMap<String, u32> = HashMap::new();
+        for (s, id) in special {
+            special_map.insert((*s).to_string(), *id);
+            decoder.entry(*id).or_insert_with(|| s.as_bytes().to_vec());
+        }
+
         let pattern = Regex::new(pattern).map_err(|e| format!("bad pattern: {}", e))?;
         Ok(Tokenizer {
             ranks,
             decoder,
             pattern,
+            special: special_map,
         })
     }
 
     /// Number of base ranks loaded (excludes special tokens).
     pub fn n_ranks(&self) -> usize {
         self.ranks.len()
+    }
+
+    /// Number of registered special tokens.
+    pub fn n_special(&self) -> usize {
+        self.special.len()
     }
 
     /// Encode text into token ids with the exact tiktoken gpt2 algorithm.
@@ -82,6 +124,50 @@ impl Tokenizer {
         let mut out: Vec<u32> = Vec::new();
         for piece in self.pretokenize(text) {
             self.encode_piece(piece.as_bytes(), &mut out);
+        }
+        out
+    }
+
+    /// Encode text, treating the `allowed` special strings as atomic tokens.
+    ///
+    /// This is the opt-in counterpart to `encode` (the ordinary encoder). It scans
+    /// for the earliest occurrence of any allowed special, encodes the ordinary
+    /// span before it with the normal BPE pipeline, emits the special's id, and
+    /// continues. A special not present in the table is ignored. Mirrors tiktoken's
+    /// `encode(text, allowed_special=...)`.
+    pub fn encode_with_special(&self, text: &str, allowed: &HashSet<&str>) -> Vec<u32> {
+        let mut out: Vec<u32> = Vec::new();
+        let mut start = 0usize;
+        loop {
+            // Find the earliest allowed special at or after `start`.
+            let mut best: Option<(usize, &str)> = None;
+            for sp in allowed {
+                let Some(&id) = self.special.get(*sp) else {
+                    continue;
+                };
+                let _ = id;
+                if let Some(pos) = text[start..].find(*sp) {
+                    let abs = start + pos;
+                    if best.map_or(true, |(b, _)| abs < b) {
+                        best = Some((abs, *sp));
+                    }
+                }
+            }
+            match best {
+                Some((idx, sp)) => {
+                    for piece in self.pretokenize(&text[start..idx]) {
+                        self.encode_piece(piece.as_bytes(), &mut out);
+                    }
+                    out.push(self.special[sp]);
+                    start = idx + sp.len();
+                }
+                None => {
+                    for piece in self.pretokenize(&text[start..]) {
+                        self.encode_piece(piece.as_bytes(), &mut out);
+                    }
+                    break;
+                }
+            }
         }
         out
     }
@@ -225,7 +311,9 @@ pub fn load_default() -> Result<Tokenizer, String> {
     let ranks_text = std::fs::read_to_string(&ranks_path)
         .map_err(|e| format!("reading ranks {}: {}", ranks_path, e))?;
 
-    Tokenizer::new(&ranks_text, &gpt2_pattern())
+    // gpt2 has exactly one special token, <|endoftext|> = 50256. It is opt-in:
+    // ordinary `encode` (what the oracle calls) still treats it as plain text.
+    Tokenizer::new_with_special(&ranks_text, &gpt2_pattern(), &[("<|endoftext|>", 50256)])
 }
 
 /// Pick a path from an env var or the first existing fallback. Returns the env
@@ -281,6 +369,38 @@ mod tests {
         let t = tk();
         let ids = t.encode("Caf\u{e9} \u{65e5}\u{672c}\u{8a9e}");
         assert_eq!(t.decode(&ids), "Caf\u{e9} \u{65e5}\u{672c}\u{8a9e}");
+    }
+
+    #[test]
+    fn endoftext_is_registered() {
+        let t = tk();
+        assert_eq!(t.n_special(), 1, "gpt2 has one special token");
+    }
+
+    #[test]
+    fn special_token_ignored_by_default() {
+        let t = tk();
+        // Ordinary encode treats the special string as plain text (oracle behavior).
+        let ids = t.encode("hello<|endoftext|>");
+        assert!(!ids.contains(&50256), "default encode must not emit the special id");
+    }
+
+    #[test]
+    fn special_token_opt_in() {
+        let t = tk();
+        let allowed: HashSet<&str> = ["<|endoftext|>"].into_iter().collect();
+        let ids = t.encode_with_special("hello world<|endoftext|>", &allowed);
+        let mut expected = t.encode("hello world");
+        expected.push(50256);
+        assert_eq!(ids, expected, "special id emitted between ordinary spans");
+    }
+
+    #[test]
+    fn special_token_decode_roundtrip() {
+        let t = tk();
+        let allowed: HashSet<&str> = ["<|endoftext|>"].into_iter().collect();
+        let ids = t.encode_with_special("a<|endoftext|>b", &allowed);
+        assert_eq!(t.decode(&ids), "a<|endoftext|>b");
     }
 
     #[test]

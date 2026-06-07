@@ -8,6 +8,7 @@
     "urlEnv": "REDIS_URL",
     "eventsStream": "glassbox:events",
     "plannerScores": "glassbox:planner_scores",
+    "plannerMeta": "glassbox:planner_meta",
     "beadsState": "glassbox:beads",
     "skillState": "glassbox:skill",
     "runsList": "glassbox:runs",

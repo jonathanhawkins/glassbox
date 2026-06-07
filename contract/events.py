@@ -17,6 +17,7 @@ REDIS: dict[str, str] = _CONTRACT["redis"]
 
 EVENTS_STREAM: str = REDIS["eventsStream"]
 PLANNER_SCORES: str = REDIS["plannerScores"]
+PLANNER_META: str = REDIS["plannerMeta"]
 BEADS_STATE: str = REDIS["beadsState"]
 SKILL_STATE: str = REDIS["skillState"]
 RUNS_LIST: str = REDIS["runsList"]
@@ -40,23 +41,44 @@ def planner_scores_key(task: str = DEFAULT_TASK) -> str:
     return f"{PLANNER_SCORES}:{t}"
 
 
+def planner_meta_key(task: str = DEFAULT_TASK) -> str:
+    """The per-task version-metadata hash key (companion to the scores sorted set).
+
+    A Redis hash keyed by ``str(version)`` holding a JSON blob per planner version
+    (accuracy, added_category, wall_ms, weave_eval_url, status, gap_source). Version
+    indexed, like the leaderboard, so the cockpit can show a ranked, Weave-linked row
+    per version that survives a reload. Mirrors the TS side, which reads
+    ``${REDIS.plannerMeta}:${task}``.
+    """
+    t = (task or DEFAULT_TASK).strip() or DEFAULT_TASK
+    return f"{PLANNER_META}:{t}"
+
+
 def make_event(
     type: str,
     run_id: str,
     *,
+    task: str = DEFAULT_TASK,
     planner_version: int = 0,
     agent: str = "system",
     bead_id: Optional[str] = None,
     title: str = "",
     payload: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """Build a canonical Glassbox event envelope."""
+    """Build a canonical Glassbox event envelope.
+
+    ``task`` scopes the event to a build target. The stream is global (all tasks
+    share ``glassbox:events``) but leaderboards and the cockpit board are per-task,
+    so every envelope carries the task it belongs to and the cockpit drops events
+    that do not match its active task.
+    """
     if type not in EVENT_TYPES:
         raise ValueError(f"unknown event type: {type!r} (allowed: {sorted(EVENT_TYPES)})")
     return {
         "ts": int(time.time() * 1000),
         "type": type,
         "run_id": run_id,
+        "task": (task or DEFAULT_TASK).strip() or DEFAULT_TASK,
         "planner_version": planner_version,
         "agent": agent,
         "bead_id": bead_id,

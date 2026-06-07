@@ -18,6 +18,13 @@ export interface GlassboxEvent {
   ts: number;
   type: EventType;
   run_id: string;
+  /**
+   * The build target this event belongs to (e.g. "tokenizer", "textkit").
+   * The stream is global but leaderboards and the cockpit board are per-task, so
+   * the board only applies events whose task matches its active task. Optional
+   * for back-compat with pre-multi-task events (treated as the default task).
+   */
+  task?: string;
   planner_version: number;
   agent: string;
   bead_id?: string | null;

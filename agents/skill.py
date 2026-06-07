@@ -32,7 +32,7 @@ defaulting to the tokenizer):
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -56,17 +56,49 @@ FOUNDATIONAL = "ascii"
 STRUCTURAL = "harness"
 
 # Canonical bead title per group. Kept in sync with SKILL.md so the deterministic
-# plan and the LLM plan use the same titles (deps wire by title).
+# plan and the LLM plan use the same titles (deps wire by title). The category
+# beads are the IMPROVER's accuracy-bearing additions: each makes one input class
+# pass exact-match by growing the regex pre-tokenization (they hang off the
+# functional scaffold's regex bead, see TOKENIZER_SCAFFOLD).
 CANONICAL_TITLE: dict[str, str] = {
-    "ascii": "Core BPE and vocab load (plain ASCII text)",
-    "punctuation": "Regex pre-tokenization for punctuation and contractions",
-    "numbers": "Numeric token handling",
-    "code": "Source-code token handling",
-    "unicode": "Byte-level UTF-8 for unicode text",
-    "whitespace": "Whitespace and spacing fidelity",
-    "emoji": "Emoji and multibyte sequences",
-    "harness": "Encode/decode pipeline and oracle diff harness",
+    "ascii": "Cover plain ASCII text",
+    "punctuation": "Cover punctuation and contractions",
+    "numbers": "Cover numeric tokens",
+    "code": "Cover source-code tokens",
+    "unicode": "Cover unicode text",
+    "whitespace": "Cover whitespace and spacing",
+    "emoji": "Cover emoji and multibyte sequences",
+    "harness": "Oracle diff harness and test runner",
 }
+
+# The PRD's functional decomposition (docs/prds/GLASSBOX_PRD.md section 4): the
+# eight tokenizer COMPONENTS the planner emits as the v1 plan. These are STRUCTURAL
+# scaffold (their tags are not scoring groups, so the worker wires them and the
+# oracle does not key accuracy off them); the climbing curve is driven by the
+# category coverage block, which the improver grows. Each entry is
+# {tag, title, deps} where deps reference other scaffold tags. The dependency
+# shape mirrors the PRD: byte_encoding / regex_pretok / harness are independent
+# (parallel immediately), bpe_merge and special_tokens depend on vocab, and encode
+# joins vocab..special_tokens.
+TOKENIZER_SCAFFOLD: list[dict] = [
+    {"tag": "vocab", "title": "Load vocab and BPE merge ranks", "deps": []},
+    {"tag": "byte_encoding", "title": "Byte-level encoding (GPT-2 byte to unicode)", "deps": []},
+    {"tag": "regex_pretok", "title": "Regex pre-tokenization (the gpt2 split pattern)", "deps": []},
+    {"tag": "bpe_merge", "title": "BPE merge loop (rank-based pair merging)", "deps": ["vocab"]},
+    {"tag": "special_tokens", "title": "Special-token handling", "deps": ["vocab"]},
+    {"tag": "encode", "title": "Encode end to end",
+     "deps": ["vocab", "byte_encoding", "regex_pretok", "bpe_merge", "special_tokens"]},
+    {"tag": "decode", "title": "Decode end to end", "deps": ["vocab", "byte_encoding"]},
+    {"tag": "harness", "title": "Oracle diff harness and test runner", "deps": []},
+]
+
+# Category beads (the improver's additions) hang off this scaffold component: each
+# input class is delivered by growing the regex pre-tokenization branches.
+TOKENIZER_SCAFFOLD_ANCHOR = "regex_pretok"
+
+# Human-facing titles for the scaffold tags (used by canonical_title so deps wire
+# by title for the scaffold beads too).
+SCAFFOLD_TITLE: dict[str, str] = {s["tag"]: s["title"] for s in TOKENIZER_SCAFFOLD}
 
 SKILL_PATH = _PLANNER_DIR / "SKILL.md"
 BASELINE_PATH = _PLANNER_DIR / "SKILL.baseline.md"
@@ -102,10 +134,25 @@ class SkillConfig:
     # What one group IS, for human-facing prose (the improver rationale, mail). The
     # tokenizer's groups are input "categories"; the textkit's are test "modules".
     unit: str = "category"
+    # The PRD functional decomposition the planner emits as the v1 plan: a list of
+    # {tag, title, deps} structural component beads. Empty means "no scaffold" (the
+    # legacy foundational + categories + structural plan, used by textkit).
+    scaffold: list[dict] = field(default_factory=list)
+    # The scaffold tag the accuracy-bearing category beads depend on (e.g. the
+    # regex pre-tokenization component for the tokenizer). None when no scaffold.
+    scaffold_anchor: Optional[str] = None
 
     def valid(self) -> set[str]:
         """The set of valid scoring groups (the coverage block entries)."""
         return set(self.order)
+
+    def scaffold_tags(self) -> set[str]:
+        """The structural tags introduced by the functional scaffold (if any)."""
+        return {s["tag"] for s in self.scaffold}
+
+    def scaffold_titles(self) -> dict[str, str]:
+        """Map each scaffold tag to its canonical bead title."""
+        return {s["tag"]: s["title"] for s in self.scaffold}
 
 
 # The default config: the tokenizer task. No-arg callers (server, legacy) get this.
@@ -113,15 +160,17 @@ TOKENIZER = SkillConfig(
     order=CATEGORY_ORDER,
     foundational=FOUNDATIONAL,
     structural=STRUCTURAL,
-    titles=CANONICAL_TITLE,
+    titles={**CANONICAL_TITLE, **SCAFFOLD_TITLE},
     skill_path=SKILL_PATH,
     baseline_path=BASELINE_PATH,
     history_dir=HISTORY_DIR,
+    scaffold=TOKENIZER_SCAFFOLD,
+    scaffold_anchor=TOKENIZER_SCAFFOLD_ANCHOR,
 )
 
 
 def canonical_title(group: str, cfg: SkillConfig = TOKENIZER) -> str:
-    """Return the canonical bead title for a group tag."""
+    """Return the canonical bead title for a group or scaffold tag."""
     return cfg.titles.get(group, group)
 
 

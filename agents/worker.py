@@ -187,15 +187,23 @@ def _author_source(
     (llm | fallback | deterministic | structural) and the before/after score.
     """
     scoring = set(getattr(task, "groups", []) or [])
+
+    # Structural / non-scoring beads (e.g. the suite/harness) change no graded source.
+    if capability not in scoring:
+        return {"source_kind": "structural"}
+
+    # Bring-your-own-repo: author real edits with the LLM only, NO deterministic
+    # fallback. The score moves only if the model genuinely fixed the tests.
+    if getattr(task, "kind", "curated") == "byo":
+        return _author_source_byo(task, capability)
+
     covered = accumulated_capabilities(run_id) & scoring
     targets = getattr(task, "edit_targets", []) or []
     group_targets = getattr(task, "group_targets", {}) or {}
     # The file this bead's group edits: a per-group module if the task maps one,
     # else the single shared editable file.
     target = group_targets.get(capability) or (targets[0] if targets else None)
-
-    # Structural / non-scoring beads (e.g. harness) do not change graded source.
-    if capability not in scoring or not target:
+    if not target:
         return {"source_kind": "structural"}
 
     # Deterministic mode: render the covered set and let the validator grade it.
@@ -242,6 +250,232 @@ def _author_source(
     }
 
 
+_BYO_MAX_CONTEXT_FILES = 12
+_BYO_MAX_FILE_CHARS = 6000
+
+
+def _glob_match(rel: str, glob: str) -> bool:
+    """fnmatch with recursive ``**`` support for the common ``**/*.ext`` case.
+
+    Plain fnmatch requires ``**/*.py`` to contain a slash, so a top-level ``calc.py``
+    would not match; we also try the de-``**``-ed variant so root files match too.
+    """
+    import fnmatch
+
+    if fnmatch.fnmatch(rel, glob):
+        return True
+    if "**/" in glob and fnmatch.fnmatch(rel, glob.replace("**/", "", 1)):
+        return True
+    return False
+
+
+def _byo_path_allowed(rel: str, edit_globs: list[str], test_paths: list[str]) -> bool:
+    """True if a worker may write ``rel`` (workspace-relative): matches an edit glob,
+    is not under any read-only test path, and does not escape the workspace."""
+    from pathlib import PurePosixPath
+
+    rel = rel.lstrip("/")
+    parts = PurePosixPath(rel).parts
+    if not rel or ".." in parts:
+        return False
+    test_prefixes = tuple(tp.strip("/") + "/" for tp in test_paths)
+    if rel.startswith(test_prefixes):
+        return False
+    return any(_glob_match(rel, g) for g in edit_globs)
+
+
+def _byo_context_files(task: Any) -> list[tuple[str, str]]:
+    """The editable files (rel, contents) to show the model, bounded for tokens."""
+    out: list[tuple[str, str]] = []
+    for rel in getattr(task, "edit_targets", []) or []:
+        if len(out) >= _BYO_MAX_CONTEXT_FILES:
+            break
+        src = task.read_target(rel)
+        out.append((rel, src[:_BYO_MAX_FILE_CHARS]))
+    return out
+
+
+def _byo_test_hashes(task: Any) -> dict[str, str]:
+    """Content hash of every file under the read-only test paths (tamper tripwire)."""
+    import hashlib
+    from pathlib import Path
+
+    ws: Path = task.workspace
+    hashes: dict[str, str] = {}
+    for tp in getattr(task, "test_paths", []) or []:
+        base = ws / tp
+        files = [base] if base.is_file() else (base.rglob("*") if base.is_dir() else [])
+        for p in files:
+            if p.is_file():
+                rel = p.relative_to(ws).as_posix()
+                hashes[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return hashes
+
+
+def _byo_parse_files(reply: str) -> dict[str, str]:
+    """Parse a model reply into {path: contents}. Expects a JSON object with a
+    ``files`` map (tolerates a fenced ```json block). Returns {} on any failure."""
+    import json
+
+    text = reply.strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        obj = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        # Fall back to the first {...} block if the model wrapped JSON in prose.
+        block = re.search(r"\{.*\}", text, re.DOTALL)
+        if not block:
+            return {}
+        try:
+            obj = json.loads(block.group(0))
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    files = obj.get("files") if isinstance(obj, dict) else None
+    if not isinstance(files, dict):
+        return {}
+    return {str(k): str(v) for k, v in files.items() if isinstance(v, str)}
+
+
+def _byo_author_llm(
+    task: Any, capability: str, failing: list[dict[str, Any]], build_error: str = ""
+) -> dict[str, str]:
+    """Ask the model to fix the failing tests for ``capability`` by editing real
+    repo files. Returns {path: new_contents} (allow-list enforced by the caller)."""
+    model = os.environ.get("GLASSBOX_CODER_MODEL") or os.environ.get(
+        "GLASSBOX_CHAT_MODEL"
+    )
+    ctx = "\n\n".join(
+        f"=== {rel} ===\n{src}" for rel, src in _byo_context_files(task)
+    )
+    fails = "\n".join(
+        f"  {f.get('test', '')}: {f.get('message', '')}" for f in failing[:10]
+    ) or "  (no per-test messages captured)"
+    globs = ", ".join(getattr(task, "edit_globs", []) or [])
+    retry = (
+        f"\n\nYour previous attempt failed with:\n{build_error[:600]}\nFix it."
+        if build_error
+        else ""
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a software engineer fixing a real repository so its test "
+                "suite passes. You may ONLY edit source files (you may NOT edit test "
+                "files). Return ONLY a JSON object of the form "
+                '{"files": {"relative/path.py": "<full new file contents>"}} with '
+                "the complete contents of each file you change. No prose."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Goal: {task.goal}\n\n"
+                f"Editable files (globs: {globs}):\n\n{ctx}\n\n"
+                f"These '{capability}' tests currently fail:\n{fails}\n\n"
+                f"Edit the source so the '{capability}' tests pass, without breaking "
+                f"others. Return the JSON files object only.{retry}"
+            ),
+        },
+    ]
+    try:
+        reply = llm.chat(messages, model=model, temperature=0.1, max_tokens=4096)
+    except llm.LLMError as exc:
+        print(f"[worker] BYO LLM unavailable, bead will bounce: {exc}")
+        return {}
+    return _byo_parse_files(reply)
+
+
+def _author_source_byo(task: Any, capability: str) -> dict[str, Any]:
+    """BYO authoring: real LLM edits, no fallback. Keep the edit only if it builds
+    and strictly raises the score AND leaves the test files untouched; else revert
+    every touched file and bounce the bead (score flat)."""
+    edit_globs = list(getattr(task, "edit_globs", []) or [])
+    test_paths = list(getattr(task, "test_paths", []) or [])
+
+    task.build()
+    before = task.evaluate()
+    test_hashes = _byo_test_hashes(task)
+    failing = [f for f in before.failures if f.get("group") == capability]
+
+    def attempt(build_error: str = "") -> tuple[bool, dict[str, str]]:
+        proposed = _byo_author_llm(task, capability, failing, build_error)
+        allowed = {
+            rel: src
+            for rel, src in proposed.items()
+            if _byo_path_allowed(rel, edit_globs, test_paths)
+        }
+        if not allowed:
+            return False, {}
+        # Snapshot the files we are about to touch so we can revert on bounce.
+        snapshot = {rel: task.read_target(rel) for rel in allowed}
+        for rel, src in allowed.items():
+            task.write_target(rel, src)
+        return True, snapshot
+
+    wrote, snapshot = attempt()
+    if not wrote:
+        return _byo_bounced(before)
+
+    ok, err = task.build()
+    if not ok:
+        wrote2, snap2 = attempt(build_error=err)
+        if wrote2:
+            snapshot = {**snap2, **snapshot}  # keep the earliest pre-bead contents
+            ok, err = task.build()
+
+    kept = False
+    if ok:
+        after = task.evaluate()
+        tampered = _byo_test_hashes(task) != test_hashes
+        if after.score > before.score and not tampered:
+            kept = True
+            return {
+                "source_kind": "llm",
+                "files": sorted(snapshot.keys()),
+                "score_before": round(before.score, 4),
+                "score_after": round(after.score, 4),
+            }
+    # Bounced: revert every touched file to its pre-bead contents.
+    if not kept:
+        for rel, src in snapshot.items():
+            task.write_target(rel, src)
+    return _byo_bounced(before)
+
+
+def _byo_bounced(before: Any) -> dict[str, Any]:
+    """A bead that left the repo unchanged (the model did not raise the score)."""
+    return {
+        "source_kind": "bounced",
+        "score_before": round(before.score, 4),
+        "score_after": round(before.score, 4),
+    }
+
+
+def _lease_path(task: Any, capability: str) -> Optional[str]:
+    """The repo-relative workspace file a worker leases for this bead, or None.
+
+    Mirrors the target selection in ``_author_source``: only scoring beads with a
+    concrete edit target take a lease; structural / non-scoring beads (e.g. the
+    harness) edit no graded source and hold no lease. The path is prefixed with the
+    task's workspace dir name so the cockpit shows a readable repo-relative path
+    (e.g. ``tokenizer-rs/src/pretok.rs``).
+    """
+    scoring = set(getattr(task, "groups", []) or [])
+    if capability not in scoring:
+        return None
+    targets = getattr(task, "edit_targets", []) or []
+    group_targets = getattr(task, "group_targets", {}) or {}
+    rel = group_targets.get(capability) or (targets[0] if targets else None)
+    if not rel:
+        return None
+    ws = getattr(task, "workspace", None)
+    name = getattr(ws, "name", None)
+    return f"{name}/{rel}" if name else rel
+
+
 @weave.op()
 def complete_bead(
     task: Any,
@@ -253,13 +487,34 @@ def complete_bead(
 ) -> dict[str, Any]:
     """Implement one already-claimed bead: author its source, close it, emit done.
 
-    Records the bead's capability into the run's covered set, genuinely authors the
-    source for it (LLM with deterministic fallback, see ``_author_source``), closes
-    the bead, and emits ``bead_done`` carrying how the source was produced. Does not
-    pace or touch agent status, so a drained wave can complete bead by bead.
+    Records the bead's capability into the run's covered set, takes a real advisory
+    Agent Mail file lease on the workspace file it edits, genuinely authors the
+    source for it (LLM with deterministic fallback, see ``_author_source``),
+    releases the lease, closes the bead, and emits ``bead_done`` carrying how the
+    source was produced. Does not pace or touch agent status, so a drained wave can
+    complete bead by bead.
     """
     accumulate(run_id, capability)
-    authored = _author_source(task, run_id, capability, agent)
+    # Reserve the file this bead edits before touching it (Agent Mail advisory
+    # lease), then release after authoring. The cockpit shows the reservation; the
+    # try/finally guarantees the lease is freed even if authoring raises.
+    lease_path = _lease_path(task, capability)
+    if lease_path:
+        bus.lease_files(
+            run_id,
+            agent,
+            [lease_path],
+            planner_version=planner_version,
+            reason=capability,
+            bead_id=bead_id,
+        )
+    try:
+        authored = _author_source(task, run_id, capability, agent)
+    finally:
+        if lease_path:
+            bus.release_files(
+                run_id, agent, [lease_path], planner_version=planner_version
+            )
     beads.close(bead_id, reason=f"{agent} implemented capability={capability}")
     caps_sorted = sorted(accumulated_capabilities(run_id))
     bus.emit_type(
@@ -272,10 +527,11 @@ def complete_bead(
     )
     kind = authored.get("source_kind", "")
     how = {
-        "llm": "wrote the Rust",
-        "fallback": "wrote the Rust (model missed, used reference)",
+        "llm": "wrote the code",
+        "fallback": "wrote the code (model missed, used reference)",
         "deterministic": "applied the reference",
         "structural": "wired the harness",
+        "bounced": "attempted, left unchanged (no improvement)",
     }.get(kind, "implemented")
     bus.emit_mail(
         run_id,

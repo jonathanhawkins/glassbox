@@ -5,9 +5,9 @@ workspace source (``task.apply_groups``), builds it (``task.build``), and grades
 the rebuilt artifact with the task's checkable evaluator (``task.evaluate``).
 Accuracy is the exact-match fraction the evaluator reports over the REAL binary, so
 it is a genuine consequence of the source, not a gate. It records that accuracy on
-the planner-version leaderboard and emits ``validation_passed`` (accuracy > 0) or
-``validation_failed``, with a payload carrying the accuracy, the covered caps, and
-the failing groups.
+the planner-version leaderboard and emits ``validation_passed`` only on a full
+exact-match sweep (accuracy >= 1.0) or ``validation_failed`` otherwise, with a
+payload carrying the accuracy, the covered caps, and the failing groups.
 
 Interface other pillars build on:
     validate(task, run_id, planner_version, caps) -> dict
@@ -22,8 +22,17 @@ _paths.ensure_repo_root()
 
 import weave  # noqa: E402
 
-from . import bus, worker  # noqa: E402
+from . import bus, llm, worker  # noqa: E402
+from harness import weave_eval  # noqa: E402
 from harness.evaluator import EvalResult  # noqa: E402
+
+# A run "passes" only on a full exact-match sweep of the corpus: every scored
+# line's token IDs equal the oracle's. That is the same bar the improve loop stops
+# on (run.py breaks at >= 1.0) and the validator's grade-pass mail uses, so the
+# board, the mail, and the loop never disagree about what "passed" means. A partial
+# score is a real, climbing number (the curve still rises), but it is NOT a pass:
+# it emits validation_failed, so a partial run is never painted green on the board.
+PASS_THRESHOLD = 1.0
 
 
 def _failed_categories(
@@ -99,6 +108,9 @@ def validate(
 
     Returns the evaluator payload augmented with ``planner_version``.
     """
+    # Ensure Weave is initialized so the Evaluation logged below lands in the
+    # project even when validate() runs outside a run_cycle (idempotent, best-effort).
+    llm.init_weave()
     bus.set_agent_status(
         run_id, "validator", "working", planner_version=planner_version
     )
@@ -129,9 +141,43 @@ def validate(
             score=0.0, passed=0, total=0, error=f"build failed: {build_err[:200]}"
         )
     accuracy = float(result.score)
-    passed = accuracy > 0.0
+    passed = accuracy >= PASS_THRESHOLD
 
     bus.set_planner_score(planner_version, accuracy, task=getattr(task, "name", "tokenizer"))
+
+    # Log a REAL weave.Evaluation for this planner version: one scored row per
+    # evaluator group plus a summary (accuracy, pass@1, efficiency, by_group), under
+    # the per-task Evaluation with model=planner_v{n}. This is what makes the curve
+    # Weave-graded rather than just a Redis number, and it is the summary the
+    # improver reads back from Weave to choose its next rewrite. Best-effort: a Weave
+    # hiccup must never fail a grade, so the swarm runs on regardless.
+    weave_eval_result = weave_eval.log_planner_eval(
+        getattr(task, "name", "tokenizer"),
+        planner_version,
+        result,
+        caps=scoring_caps,
+    )
+    weave_eval_url = (
+        weave_eval_result.get("url") if weave_eval_result.get("logged") else None
+    )
+
+    # Persist the per-version leaderboard metadata (the grade half): the cockpit's
+    # ranked panel reads this back so each row shows accuracy, efficiency, status, and
+    # a deep link to THIS version's Weave Evaluation, and survives a page reload (the
+    # improver writes the other half, the category that produced the version).
+    bus.set_planner_meta(
+        getattr(task, "name", "tokenizer"),
+        planner_version,
+        accuracy=accuracy,
+        wall_ms=getattr(result, "wall_ms", 0),
+        weave_eval_url=weave_eval_url,
+        status="passed" if accuracy >= 1.0 else ("partial" if passed else "failed"),
+        covered=scoring_caps,
+        # The real per-category pass tally (passed/total per scoring group) from the
+        # same graded run. Surfaced so the cockpit can draw the climb matrix with true
+        # pass-fraction cells, not just binary covered/not. Small (a handful of groups).
+        by_group={k: dict(v) for k, v in (result.by_group or {}).items()},
+    )
 
     # The real per-group failure breakdown (biggest gap first) is the signal the
     # improver prioritizes on and the cockpit surfaces as "what it found".
@@ -155,16 +201,18 @@ def validate(
             "passed_lines": result.passed,
             "total_lines": result.total,
             "oracle_error": result.error,
+            "weave_eval_url": weave_eval_url,
+            "weave_eval_logged": bool(weave_eval_result.get("logged")),
         },
     )
-    # Mail splits grade-pass vs grade-fail on the stricter "fully green" bar
-    # (accuracy >= 1.0), matching the improve loop's real "are we done?" test
-    # (run.py breaks at >= 1.0 and only rewrites below it). This deliberately
-    # differs from the validation_passed/failed EVENT, which uses passed = acc > 0:
-    # a partial score can read validation_passed on the board yet grade-fail in the
-    # mail, i.e. "graded, but the improver still has work."
+    # The grade-pass / grade-fail mail rides the SAME exact-match bar as the
+    # validation_passed/failed EVENT above (PASS_THRESHOLD) and the improve loop's
+    # "are we done?" test (run.py breaks at >= 1.0 and only rewrites below it), so
+    # the board, the mail, and the loop never disagree about what "passed" means. A
+    # partial score is "graded, but the improver still has work": a grade-fail mail,
+    # a validation_failed event, and a board that shows the gap instead of green.
     pct = round(accuracy * 100)
-    if accuracy >= 1.0:
+    if passed:
         bus.emit_mail(
             run_id,
             "validator",
@@ -191,10 +239,13 @@ def validate(
             kind="grade-fail",
             cap=top,
         )
+    # The validator lane goes green ("done") only on a genuine pass; a partial or
+    # broken run reads "failed" (not "idle"), matching the validation_failed event
+    # the board receives, so the lane never looks settled on a sub-1.0 run.
     bus.set_agent_status(
         run_id,
         "validator",
-        "done" if accuracy >= 1.0 else ("idle" if passed else "failed"),
+        "done" if passed else "failed",
         planner_version=planner_version,
     )
 
@@ -202,4 +253,6 @@ def validate(
     out["planner_version"] = planner_version
     out["failed_categories"] = failed_categories
     out["failing"] = failing
+    out["weave_eval_url"] = weave_eval_url
+    out["weave_eval_logged"] = bool(weave_eval_result.get("logged"))
     return out

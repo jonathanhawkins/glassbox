@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "1": "{\"accuracy\": 0.0, \"wall_ms\": 0, \"status\": \"failed\", \"covered\": [], \"version\": 1, \"weave_eval_url\": \"https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019ea320-a49b-7db1-9902-739c4c9a16b6\"}",
+    "2": "{\"accuracy\": 0.6, \"wall_ms\": 0, \"status\": \"failed\", \"covered\": [\"ascii\"], \"version\": 2, \"added_category\": \"punctuation\", \"gap_source\": \"in_process\", \"prev_accuracy\": 0.17050691244239632, \"weave_eval_url\": \"https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019ea321-87e1-7a5b-891b-d6d49e3b8fd3\"}",
+    "3": "{\"added_category\": \"numbers\", \"gap_source\": \"in_process\", \"prev_accuracy\": 0.5714285714285714, \"version\": 3, \"accuracy\": 0.7142857142857143, \"wall_ms\": 278, \"weave_eval_url\": \"https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019ea322-4e36-711d-b070-d52144811f19\", \"status\": \"failed\", \"covered\": [\"numbers\", \"punctuation\"]}",
+    "4": "{\"added_category\": \"unicode\", \"gap_source\": \"in_process\", \"prev_accuracy\": 0.7142857142857143, \"version\": 4, \"accuracy\": 0.8571428571428571, \"wall_ms\": 343, \"weave_eval_url\": \"https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019ea323-6f74-7c4e-a22a-481177e5655c\", \"status\": \"failed\", \"covered\": [\"numbers\", \"punctuation\", \"unicode\"]}",
+    "5": "{\"added_category\": \"whitespace\", \"gap_source\": \"in_process\", \"prev_accuracy\": 0.8571428571428571, \"version\": 5, \"accuracy\": 1.0, \"wall_ms\": 282, \"weave_eval_url\": \"https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019ea324-aa26-7374-ba0a-466aa0a99c5c\", \"status\": \"passed\", \"covered\": [\"numbers\", \"punctuation\", \"unicode\", \"whitespace\"]}",
+    "6": "{\"added_category\": \"code\", \"gap_source\": \"in_process\", \"prev_accuracy\": 1.0, \"version\": 6, \"accuracy\": 1.0, \"wall_ms\": 238, \"weave_eval_url\": \"https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019ea326-0333-793a-ae7f-ae09b328eac4\", \"status\": \"passed\", \"covered\": [\"code\", \"numbers\", \"punctuation\", \"unicode\", \"whitespace\"]}",
+    "7": "{\"added_category\": \"emoji\", \"gap_source\": \"in_process\", \"prev_accuracy\": 1.0, \"version\": 7}",
+    "8": "{\"accuracy\": 1.0, \"wall_ms\": 0, \"status\": \"passed\", \"covered\": [\"ascii\", \"numbers\", \"punctuation\"], \"version\": 8}"
+  },
+  "meta_key": "glassbox:planner_meta:tokenizer",
+  "scores": [
+    [
+      "1",
+      0.17050691244239632
+    ],
+    [
+      "2",
+      0.5714285714285714
+    ],
+    [
+      "3",
+      0.7142857142857143
+    ],
+    [
+      "4",
+      0.8571428571428571
+    ],
+    [
+      "5",
+      1.0
+    ],
+    [
+      "6",
+      1.0
+    ]
+  ],
+  "scores_key": "glassbox:planner_scores:tokenizer",
+  "task": "tokenizer"
+}
