@@ -5,16 +5,15 @@
 // decode: first arg "decode"; read stdin line by line, each a JSON array of ids,
 //   print the decoded text.
 //
-// Category gating: --caps <comma list> or GLASSBOX_CAPS env names the ENABLED
-// categories. Each input line is classified into one category; if enabled it
-// gets exact token ids, otherwise a single wrong-token [0]. If neither --caps
-// nor env is given, all categories are on (default output is exact). The literal
-// "all" means all on. Structural names are accepted as no-ops.
+// Tokenization correctness is a function of the pretokenizer pattern in
+// src/pretok.rs (the lever the swarm edits); the oracle grades the real binary.
+// There is no gating: the binary always runs the exact tiktoken algorithm over
+// whatever pattern the source currently defines.
 
 use std::io::{self, BufRead, Write};
 use std::process::exit;
 
-use glassbox_tokenizer::{load_default, Caps, Tokenizer};
+use glassbox_tokenizer::{load_default, Tokenizer};
 
 enum Mode {
     Encode,
@@ -25,24 +24,12 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     let mut mode = Mode::Encode;
-    let mut caps_spec: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
         match a.as_str() {
             "encode" => mode = Mode::Encode,
             "decode" => mode = Mode::Decode,
-            "--caps" => {
-                i += 1;
-                if i >= args.len() {
-                    eprintln!("error: --caps requires a value");
-                    exit(2);
-                }
-                caps_spec = Some(args[i].clone());
-            }
-            s if s.starts_with("--caps=") => {
-                caps_spec = Some(s["--caps=".len()..].to_string());
-            }
             "-h" | "--help" => {
                 print_help();
                 return;
@@ -54,15 +41,6 @@ fn main() {
         }
         i += 1;
     }
-
-    // Precedence: explicit --caps overrides env. If neither is set, all on.
-    let caps = match caps_spec {
-        Some(s) => Caps::parse(&s),
-        None => match std::env::var("GLASSBOX_CAPS") {
-            Ok(v) if !v.trim().is_empty() => Caps::parse(&v),
-            _ => Caps::all_on(),
-        },
-    };
 
     let tok = match load_default() {
         Ok(t) => t,
@@ -77,7 +55,7 @@ fn main() {
     let mut out = io::BufWriter::new(stdout.lock());
 
     let result = match mode {
-        Mode::Encode => run_encode(&tok, &caps, stdin.lock(), &mut out),
+        Mode::Encode => run_encode(&tok, stdin.lock(), &mut out),
         Mode::Decode => run_decode(&tok, stdin.lock(), &mut out),
     };
 
@@ -93,41 +71,30 @@ fn main() {
 }
 
 /// Read stdin line by line and write one JSON id array per line.
-fn run_encode<R: BufRead, W: Write>(
-    tok: &Tokenizer,
-    caps: &Caps,
-    reader: R,
-    out: &mut W,
-) -> io::Result<()> {
+fn run_encode<R: BufRead, W: Write>(tok: &Tokenizer, reader: R, out: &mut W) -> io::Result<()> {
     // We iterate raw bytes split on \n so that a missing trailing newline still
     // produces exactly one output line per input line, and so leading/trailing
     // spaces inside a line are preserved (BufRead::lines strips only the \n).
     let mut buf: Vec<u8> = Vec::new();
     let mut reader = reader;
-    let mut had_any = false;
-    let mut last_was_newline = false;
     loop {
         buf.clear();
         let n = reader.read_until(b'\n', &mut buf)?;
         if n == 0 {
             break;
         }
-        had_any = true;
         // Strip a single trailing \n and an optional preceding \r.
-        last_was_newline = buf.last() == Some(&b'\n');
-        if last_was_newline {
+        if buf.last() == Some(&b'\n') {
             buf.pop();
             if buf.last() == Some(&b'\r') {
                 buf.pop();
             }
         }
         let line = String::from_utf8_lossy(&buf);
-        let ids = tok.encode(&line, caps);
+        let ids = tok.encode(&line);
         write_ids(out, &ids)?;
         out.write_all(b"\n")?;
     }
-    // If the input was completely empty, emit nothing (no lines).
-    let _ = (had_any, last_was_newline);
     Ok(())
 }
 
@@ -197,14 +164,12 @@ fn print_help() {
     println!("tok - Glassbox gpt2 BPE tokenizer");
     println!();
     println!("USAGE:");
-    println!("  tok [encode] [--caps <list>]   encode stdin lines to JSON id arrays");
-    println!("  tok decode   [--caps <list>]   decode stdin JSON id arrays to text");
+    println!("  tok [encode]   encode stdin lines to JSON id arrays");
+    println!("  tok decode     decode stdin JSON id arrays to text");
     println!();
-    println!("CAPS = enabled categories (comma separated; default = all on; literal 'all' = all on):");
-    println!("  ascii, punctuation, numbers, code, unicode, emoji, whitespace");
-    println!("  (structural names merges, vocab, encode, decode, special, harness are accepted as no-ops)");
+    println!("Tokenization correctness comes from the pretokenizer pattern in");
+    println!("src/pretok.rs (the lever the swarm edits). There is no gating.");
     println!();
     println!("DATA FILES (env override, else fallback):");
     println!("  GLASSBOX_RANKS  (default ../harness/data/gpt2.tiktoken or harness/data/...)");
-    println!("  GLASSBOX_META   (default ../harness/data/meta.json or harness/data/...)");
 }

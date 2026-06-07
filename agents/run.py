@@ -67,11 +67,16 @@ def _drain_graph(
 ) -> int:
     """Claim+work every ready bead until the graph drains. Returns beads worked.
 
-    One pass = coordinator.assign_ready (claims ready beads round-robin) then a
-    worker implements each (closes it, accumulates its category). Repeats while
-    ``beads.ready()`` is non-empty, bounded by ``_MAX_PASSES``. Honors
-    GLASSBOX_PACE_MS between passes so the board is watchable in the demo (0 in
-    the overnight loop).
+    Each pass is ONE PARALLEL WAVE: ``coordinator.assign_ready`` claims every
+    currently-ready bead and fans it round-robin across the worker pool (so all
+    free workers light up at once, not one at a time), then the whole wave is
+    worked TOGETHER: each claimed worker stays ``working`` through a single shared
+    pace beat, and every bead finishes at the end of the beat. This is what makes
+    the cockpit show genuine parallelism (the wide middle wave occupies all four
+    workers simultaneously) instead of a single worker ticking through the beads.
+
+    Repeats while ``beads.ready()`` is non-empty, bounded by ``_MAX_PASSES``.
+    Honors GLASSBOX_PACE_MS so the board is watchable in the demo (0 overnight).
     """
     passes = 0
     worked = 0
@@ -89,30 +94,51 @@ def _drain_graph(
                 payload={"passes": passes},
             )
             break
+        # Claim the whole ready wave at once: every ready bead is assigned to a
+        # worker (round-robin) and that worker is flipped to ``working`` here.
         assignments = coordinator.assign_ready(
             run_id, planner_version=planner_version
         )
         if not assignments:
             # Nothing claimable even though ready() was non-empty: avoid a spin.
             break
+
+        # Stage the wave: record every claimed bead's category up front. The
+        # workers are already lit (assign_ready), so the whole wave is now in
+        # flight together.
         for a in assignments:
-            bead_id = a["bead_id"]
-            capability = a.get("capability") or cap_by_id.get(bead_id, "")
-            worker.run_bead(
+            a["capability"] = a.get("capability") or cap_by_id.get(a["bead_id"], "")
+            worker.accumulate(run_id, a["capability"])
+
+        # One shared beat: all claimed workers stay lit side by side (demo only).
+        worker._pace_sleep()
+
+        # Finish the wave together: every bead closes and emits bead_done at the
+        # end of the same beat, so the chips fly to the validated rail as a group.
+        for a in assignments:
+            worker.complete_bead(
                 run_id,
-                bead_id,
-                capability,
+                a["bead_id"],
+                a["capability"],
                 agent=a.get("assignee", "worker-1"),
                 planner_version=planner_version,
             )
             worked += 1
-        # Pace between waves so chips are visibly in flight (demo only).
+
+        # Settle every worker that took part in this wave back to idle, once.
+        for w in {a.get("assignee", "worker-1") for a in assignments}:
+            bus.set_agent_status(
+                run_id, w, "idle", planner_version=planner_version
+            )
+
+        # A short gap before the next wave so the rail hand-off reads cleanly.
         worker._pace_sleep()
     return worked
 
 
 @weave.op()
 def run_cycle(
+    task: Any,
     goal: str,
     run_id: str,
     planner_version: int = 1,
@@ -146,7 +172,7 @@ def run_cycle(
 
     worked = _drain_graph(run_id, planner_version, cap_by_id)
 
-    result = validator.validate(run_id, planner_version=planner_version)
+    result = validator.validate(task, run_id, planner_version=planner_version)
     accuracy = float(result.get("accuracy", 0.0))
     caps = sorted(worker.accumulated_capabilities(run_id))
 
@@ -173,11 +199,14 @@ def run_cycle(
         "caps": caps,
         "beads": len(plan),
         "covered": planner.covered_categories(),
+        "failing": result.get("failing", []),
+        "failed_categories": result.get("failed_categories", []),
     }
 
 
 @weave.op()
 def improve_loop(
+    task: Any,
     goal: str,
     run_base: str = "auto",
     max_versions: int = 8,
@@ -208,9 +237,11 @@ def improve_loop(
     weave_url = _weave_url()
 
     # Always start from the incomplete baseline so there is real room to climb,
-    # regardless of what a previous session left on disk.
+    # regardless of what a previous session left on disk: reset BOTH the planner
+    # skill AND the task workspace source to their incomplete baselines.
     skill.reset_to_baseline()
     skill.snapshot(1)
+    task.reset_workspace()
 
     base = run_base if run_base and run_base != "auto" else _auto_base("improve")
     cap = max(1, int(max_versions))
@@ -219,9 +250,13 @@ def improve_loop(
     for n in range(1, cap + 1):
         run_id = f"{base}-v{n}"
         covered_before = planner.covered_categories()
-        summary = run_cycle(goal, run_id, planner_version=n)
+        summary = run_cycle(task, goal, run_id, planner_version=n)
+        task.snapshot_workspace(n)
         accuracy = float(summary["accuracy"])
-        failed = _failed_categories_for(run_id, summary)
+        failing = summary.get("failing", [])
+        failed = [f["category"] for f in failing] or _failed_categories_for(
+            run_id, summary
+        )
         summaries.append(
             {
                 "version": n,
@@ -234,14 +269,18 @@ def improve_loop(
         )
         if accuracy >= 1.0:
             break
-        # Genuine rewrite: grow the skill to cover the next failing category.
-        improver.improve(run_id, n, accuracy, failed_categories=failed)
+        # Genuine rewrite: grow the skill to cover the BIGGEST failing gap (from
+        # the eval breakdown), which varies run to run.
+        improver.improve(
+            run_id, n, accuracy, failed_categories=failed, failing=failing
+        )
 
     return summaries
 
 
 @weave.op()
 def run_cycle_live(
+    task: Any,
     goal: str,
     run_id: str = "live",
     planner_version: int = 1,
@@ -293,7 +332,7 @@ def run_cycle_live(
     _drain_graph(run_id, planner_version, cap_by_id)
 
     before = float(
-        validator.validate(run_id, planner_version=planner_version).get(
+        validator.validate(task, run_id, planner_version=planner_version).get(
             "accuracy", 0.0
         )
     )
@@ -353,7 +392,7 @@ def run_cycle_live(
 
         # 4) Re-validate: the accuracy visibly jumps.
         acc = float(
-            validator.validate(run_id, planner_version=planner_version).get(
+            validator.validate(task, run_id, planner_version=planner_version).get(
                 "accuracy", 0.0
             )
         )
@@ -394,6 +433,7 @@ def run_cycle_live(
 
 @weave.op()
 def climb_loop(
+    task: Any,
     goal: str,
     run_base: str,
     versions: int = 5,
@@ -417,7 +457,7 @@ def climb_loop(
     for n in range(1, v + 1):
         run_id = f"{run_base}-v{n}"
         allowed = schedule[n - 1]
-        summary = run_cycle(goal, run_id, planner_version=n, allowed_caps=allowed)
+        summary = run_cycle(task, goal, run_id, planner_version=n, allowed_caps=allowed)
         summaries.append(summary)
         # Bump the version badge for the next cycle (no skill rewrite here).
         if n < v:
@@ -475,9 +515,12 @@ if __name__ == "__main__":
     import json
     import sys
 
-    g = sys.argv[1] if len(sys.argv) > 1 else "port the BPE tokenizer to Rust"
+    from tasks import load_task
+
+    task = load_task(sys.argv[4] if len(sys.argv) > 4 else "tokenizer")
+    g = sys.argv[1] if len(sys.argv) > 1 else task.goal
     base = sys.argv[2] if len(sys.argv) > 2 else "dev"
     n = int(sys.argv[3]) if len(sys.argv) > 3 else 8
-    out = improve_loop(g, base, n)
+    out = improve_loop(task, g, base, n)
     print(json.dumps(out, indent=2))
     print("leaderboard:", bus.get_leaderboard())

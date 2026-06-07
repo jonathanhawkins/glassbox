@@ -2,12 +2,12 @@
 token IDs against tiktoken gpt2 ground truth (exact match per line).
 
 The Rust binary (tokenizer-rs/target/release/tok) reads stdin lines and prints
-one JSON array of token IDs per line. It accepts --caps (comma separated list of
-enabled CATEGORIES; omitted, empty, or the literal "all" means every category is
-enabled, i.e. exact tokenization). The categories are the 7 scoring tags from
-contract/CAPABILITIES.md: ascii, punctuation, numbers, code, unicode, emoji,
-whitespace (structural tags like harness are accepted but have no scoring
-effect).
+one JSON array of token IDs per line. There is no gating: the binary always runs
+the exact tiktoken algorithm over whatever pretokenizer its source currently
+defines, so accuracy is a genuine function of the tokenizer source (the swarm
+edits tokenizer-rs/src/pretok.rs and the score follows). The fixtures carry a
+``category`` field used only to report a per-category (by_group) failure
+breakdown, which steers the improver.
 
 This module is defensive on purpose: the Rust binary is built in parallel and may
 be missing, a stub (no output), or partially implemented (wrong line count, bad
@@ -15,12 +15,13 @@ JSON). In every such case run_oracle returns accuracy 0.0 with a clear error
 string instead of raising, so the self-improvement loop never crashes.
 
 CLI:
-  uv run python -m harness.oracle [--caps ascii,punctuation,numbers]
+  uv run python -m harness.oracle [--bin PATH] [--fixtures PATH]
 """
 from __future__ import annotations
 
 import argparse
 import json
+import random
 import subprocess
 import time
 from pathlib import Path
@@ -89,6 +90,7 @@ def _empty_result(caps, total, error, wall_ms=0) -> dict:
         "wall_ms": wall_ms,
         "caps": caps,
         "failed_examples": [],
+        "by_category": {},
         "error": error,
     }
 
@@ -97,6 +99,8 @@ def run_oracle(
     bin_path: Optional[str | Path] = None,
     caps: Optional[list[str] | str] = None,
     fixtures: str | Path = DEFAULT_FIXTURES,
+    seed: Optional[int] = None,
+    sample_min: int = 12,
 ) -> dict:
     """Run the Rust tokenizer over every fixture once and score exact-match accuracy.
 
@@ -128,9 +132,26 @@ def run_oracle(
     caps_norm = caps_list if caps_list else None
 
     rows = load_fixtures(fixtures)
+    # Optional seeded per-run sampling: a held-out eval batch whose per-category
+    # sizes vary by run, so the failure magnitudes (and thus the improver's
+    # priority) are genuinely data-driven and differ run to run. seed=None scores
+    # the full corpus (deterministic, used by the CLI and tests).
+    if seed is not None:
+        by_cat_rows: dict[str, list] = {}
+        for idx, r in enumerate(rows):
+            by_cat_rows.setdefault(str(r.get("category", "?")), []).append((idx, r))
+        chosen: list = []
+        for cat, items in by_cat_rows.items():
+            rnd = random.Random(f"{seed}:{cat}")
+            hi = max(sample_min, len(items) - 4)
+            k = len(items) if len(items) <= sample_min else rnd.randint(sample_min, hi)
+            chosen.extend(rnd.sample(items, k))
+        chosen.sort(key=lambda t: t[0])
+        rows = [r for _idx, r in chosen]
     total = len(rows)
     texts = [r["text"] for r in rows]
     expected_ids = [r["ids"] for r in rows]
+    categories = [str(r.get("category", "?")) for r in rows]
 
     binary = _resolve_bin(bin_path)
     if not binary.exists():
@@ -141,8 +162,11 @@ def run_oracle(
         )
 
     cmd = [str(binary)]
-    if caps_norm:
-        cmd += ["--caps", ",".join(caps_norm)]
+    # The binary is de-gated (no --caps): it always runs the exact tiktoken
+    # algorithm over whatever its source currently defines, so accuracy is a
+    # genuine function of the tokenizer source. `caps` is accepted by run_oracle
+    # for backward compatibility but is intentionally NOT passed to the binary.
+    _ = caps_norm
 
     # One fixture text per stdin line. Texts are guaranteed newline free by the
     # fixture generator, so line index maps 1:1 to fixture index.
@@ -193,8 +217,15 @@ def run_oracle(
     passed = 0
     failed_examples: list[dict] = []
     parse_errors = 0
+    # Per-category exact-match tally so the validator can report which categories
+    # are failing and by HOW MUCH (the real signal the improver prioritizes on).
+    cat_total: dict[str, int] = {}
+    cat_passed: dict[str, int] = {}
+    for c in categories:
+        cat_total[c] = cat_total.get(c, 0) + 1
     n = min(len(out_lines), total)
     for i in range(n):
+        cat = categories[i]
         got = _parse_ids(out_lines[i])
         if got is None:
             parse_errors += 1
@@ -204,18 +235,33 @@ def run_oracle(
                         "text": texts[i],
                         "expected": expected_ids[i],
                         "got": out_lines[i].strip()[:200],
+                        "category": cat,
                     }
                 )
             continue
         if got == expected_ids[i]:
             passed += 1
+            cat_passed[cat] = cat_passed.get(cat, 0) + 1
         elif len(failed_examples) < MAX_FAILED_EXAMPLES:
             failed_examples.append(
-                {"text": texts[i], "expected": expected_ids[i], "got": got}
+                {
+                    "text": texts[i],
+                    "expected": expected_ids[i],
+                    "got": got,
+                    "category": cat,
+                }
             )
 
     # accuracy is over ALL fixtures, so a short/long output is penalized.
     accuracy = passed / total if total else 0.0
+    by_category = {
+        c: {
+            "total": cat_total.get(c, 0),
+            "passed": cat_passed.get(c, 0),
+            "failed": cat_total.get(c, 0) - cat_passed.get(c, 0),
+        }
+        for c in cat_total
+    }
 
     error = ""
     if len(out_lines) != total:
@@ -234,6 +280,8 @@ def run_oracle(
         "wall_ms": wall_ms,
         "caps": caps_norm,
         "failed_examples": failed_examples,
+        "by_category": by_category,
+        "seed": seed,
         "error": error,
     }
 
@@ -241,20 +289,15 @@ def run_oracle(
 def _main() -> None:
     ap = argparse.ArgumentParser(description="Run the Glassbox tokenizer oracle diff.")
     ap.add_argument("--bin", default=None, help="path to the tok binary")
-    ap.add_argument(
-        "--caps",
-        default=None,
-        help="comma separated categories (omit for all = exact)",
-    )
     ap.add_argument("--fixtures", default=str(DEFAULT_FIXTURES))
     args = ap.parse_args()
 
-    res = run_oracle(bin_path=args.bin, caps=args.caps, fixtures=args.fixtures)
+    res = run_oracle(bin_path=args.bin, fixtures=args.fixtures)
     # Print a compact human summary plus the full JSON.
     print(
         f"accuracy={res['accuracy']:.4f} "
         f"passed={res['passed']}/{res['total']} "
-        f"wall_ms={res['wall_ms']} caps={res['caps']}"
+        f"wall_ms={res['wall_ms']}"
     )
     if res["error"]:
         print(f"note: {res['error']}")

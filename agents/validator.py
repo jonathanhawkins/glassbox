@@ -13,6 +13,7 @@ Interface other pillars build on:
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Iterable, Optional
 
 from . import _paths
@@ -23,9 +24,7 @@ import weave  # noqa: E402
 
 from . import bus, worker  # noqa: E402
 from .planner import CATEGORY_ORDER, STRUCTURAL  # noqa: E402
-
-# Import the oracle lazily-safely at module load; harness is a sibling package.
-from harness.oracle import run_oracle  # noqa: E402
+from harness.evaluator import EvalResult  # noqa: E402
 
 # The scoring categories the oracle understands (structural tags do not score).
 _SCORING_CATEGORIES = set(CATEGORY_ORDER)
@@ -51,22 +50,58 @@ def _failed_categories(
     return sorted(_SCORING_CATEGORIES - set(caps))
 
 
+def _failing_breakdown(
+    scoring_caps: list[str], by_category: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Per-category failures (biggest first) for the categories NOT yet covered.
+
+    Reads the oracle's by_category tally and returns, for each uncovered scoring
+    category with failures, {category, failed, total}, sorted by failed desc with
+    a canonical tiebreak. This is the data-driven signal the improver prioritizes
+    and the cockpit surfaces as "what the eval found".
+    """
+    covered = set(scoring_caps)
+    rows = [
+        {
+            "category": c,
+            "failed": int(v.get("failed", 0)),
+            "total": int(v.get("total", 0)),
+        }
+        for c, v in (by_category or {}).items()
+        if c in _SCORING_CATEGORIES
+        and c not in covered
+        and int(v.get("failed", 0)) > 0
+    ]
+    rows.sort(
+        key=lambda f: (
+            -f["failed"],
+            CATEGORY_ORDER.index(f["category"])
+            if f["category"] in CATEGORY_ORDER
+            else 99,
+        )
+    )
+    return rows
+
+
 @weave.op()
 def validate(
+    task: Any,
     run_id: str,
     planner_version: int = 1,
     caps: Optional[Iterable[str]] = None,
 ) -> dict[str, Any]:
-    """Grade the run with the real oracle, record the score, emit a result event.
+    """Grade the run with the real evaluator, record the score, emit a result event.
 
     ``caps`` defaults to the categories accumulated for this run (the Redis set
-    glassbox:run:<run_id>:caps). The oracle is run gated on the SCORING subset of
-    those caps (structural tags like ``harness`` are dropped, as they have no
-    scoring effect). The resulting accuracy is ZADDed onto the leaderboard for
-    ``planner_version`` and a validation_passed/failed event is emitted with
-    payload {accuracy, caps, failed_categories}.
+    glassbox:run:<run_id>:caps). The covered SCORING subset is realized into the
+    task workspace source (``task.apply_groups``), the workspace is built, and the
+    rebuilt artifact is graded by the task's checkable evaluator (``task.evaluate``)
+    with NO gating, so accuracy is a genuine consequence of the source. The score is
+    ZADDed onto the leaderboard for ``planner_version`` and a
+    validation_passed/failed event is emitted with payload
+    {accuracy, caps, failed_categories, ...}.
 
-    Returns the oracle dict augmented with ``planner_version``.
+    Returns the evaluator payload augmented with ``planner_version``.
     """
     bus.set_agent_status(
         run_id, "validator", "working", planner_version=planner_version
@@ -76,26 +111,38 @@ def validate(
         caps = worker.accumulated_capabilities(run_id)
     caps = set(caps)
 
-    # Only the scoring categories gate the oracle. Drop structural tags so a run
-    # that only covered the harness bead does not accidentally request a
-    # non-scoring cap (the oracle treats unknown/structural names as no-ops, but
-    # being explicit keeps the reported caps meaningful).
+    # The scoring categories the workers have covered this run. Structural tags
+    # (harness) are dropped: they have no scoring effect.
     scoring_caps = sorted(caps & _SCORING_CATEGORIES)
 
-    # The oracle treats an empty/None caps list as "all categories" (exact, 1.0),
-    # which is the right default for a no-caps CLI invocation. But for the
-    # validator, zero covered categories must mean ZERO accuracy, not full. So
-    # when no scoring category is covered we pass an explicit non-scoring sentinel
-    # ("__none__"): the tokenizer enables nothing and every line fails exact
-    # match, giving accuracy 0 and the validation_failed path.
-    oracle_caps = scoring_caps if scoring_caps else ["__none__"]
-    result = run_oracle(caps=oracle_caps)
-    accuracy = float(result.get("accuracy", 0.0))
+    # Genuine grading: realize the covered set into the real workspace source,
+    # build it, and grade the rebuilt artifact with the task's checkable evaluator.
+    # Accuracy is a real consequence of the source (no gating): for the tokenizer,
+    # apply_groups rewrites src/pretok.rs for `scoring_caps`, build runs cargo, and
+    # evaluate runs the exact-match oracle over the corpus. Zero covered categories
+    # therefore yields a real low score, not a sentinel.
+    task.apply_groups(scoring_caps)
+    build_ok, build_err = task.build()
+    # Seed the per-run eval sample from the run id, so each run grades a different
+    # held-out batch and the per-category failure magnitudes vary run to run.
+    seed = int(hashlib.sha1(run_id.encode("utf-8")).hexdigest()[:8], 16)
+    if build_ok:
+        result = task.evaluate(seed=seed)
+    else:
+        result = EvalResult(
+            score=0.0, passed=0, total=0, error=f"build failed: {build_err[:200]}"
+        )
+    accuracy = float(result.score)
     passed = accuracy > 0.0
 
     bus.set_planner_score(planner_version, accuracy)
 
-    failed_categories = _failed_categories(caps, result.get("failed_examples", []))
+    # The real per-group failure breakdown (biggest gap first) is the signal the
+    # improver prioritizes on and the cockpit surfaces as "what it found".
+    failing = _failing_breakdown(scoring_caps, result.by_group)
+    failed_categories = [f["category"] for f in failing] or _failed_categories(
+        caps, result.failures
+    )
 
     bus.emit_type(
         "validation_passed" if passed else "validation_failed",
@@ -108,11 +155,46 @@ def validate(
             "caps": sorted(caps),
             "scoring_caps": scoring_caps,
             "failed_categories": failed_categories,
-            "passed_lines": result.get("passed", 0),
-            "total_lines": result.get("total", 0),
-            "oracle_error": result.get("error", ""),
+            "failing": failing,
+            "passed_lines": result.passed,
+            "total_lines": result.total,
+            "oracle_error": result.error,
         },
     )
+    # Mail splits grade-pass vs grade-fail on the stricter "fully green" bar
+    # (accuracy >= 1.0), matching the improve loop's real "are we done?" test
+    # (run.py breaks at >= 1.0 and only rewrites below it). This deliberately
+    # differs from the validation_passed/failed EVENT, which uses passed = acc > 0:
+    # a partial score can read validation_passed on the board yet grade-fail in the
+    # mail, i.e. "graded, but the improver still has work."
+    pct = round(accuracy * 100)
+    if accuracy >= 1.0:
+        bus.emit_mail(
+            run_id,
+            "validator",
+            "improver",
+            f"v{planner_version} passed at {pct}%",
+            planner_version=planner_version,
+            body="all categories green, nothing to fix",
+            kind="grade-pass",
+        )
+    else:
+        top = (
+            failing[0]["category"]
+            if failing
+            else (failed_categories[0] if failed_categories else "coverage")
+        )
+        miss = ", ".join(failed_categories) if failed_categories else top
+        bus.emit_mail(
+            run_id,
+            "validator",
+            "improver",
+            f"Gap: {top} failing at {pct}%",
+            planner_version=planner_version,
+            body=f"v{planner_version} scored {pct}%; failing: {miss}",
+            kind="grade-fail",
+            cap=top,
+        )
     bus.set_agent_status(
         run_id,
         "validator",
@@ -120,7 +202,8 @@ def validate(
         planner_version=planner_version,
     )
 
-    out = dict(result)
+    out = result.to_payload()
     out["planner_version"] = planner_version
     out["failed_categories"] = failed_categories
+    out["failing"] = failing
     return out
