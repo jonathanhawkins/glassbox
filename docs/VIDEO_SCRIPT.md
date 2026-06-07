@@ -49,15 +49,18 @@ the architecture slide in the deck.
 Let the board animate: beads appear, coordinator routes, worker lanes go amber, a bead
 travels to the validator.
 **Say:**
-> Watch it run. I type the goal into the command bar. The planner lays the beads on the
-> canvas, the coordinator routes the ready ones, and the worker lanes light up as they
-> claim each piece and write it. A finished bead travels to the validator, which builds
-> the Rust and diffs the token IDs against tiktoken. That number is real: exact match, no
+> Watch it run. I type the goal into the CopilotKit command bar. The planner lays the
+> beads on the tldraw canvas, the coordinator routes the ready ones, and the worker lanes
+> light up as they write each piece with W&B Inference. Everything moving on this board is
+> a live Redis event stream. A finished bead travels to the validator, which builds the
+> Rust and diffs the token IDs against tiktoken. That number is real: exact match, no
 > gating, no hardcoded answers.
 
 ### 4. The climb (the point)  (1:20 to 1:48)
-**On screen:** the correctness curve climbing v1 to v6. Cut to the Weave tab (nested
-sessions), then to the skill diff (`history/v1` vs the latest, or the skill viewer).
+**On screen:** the correctness curve climbing v1 to v6 (optionally ask the copilot "show
+the correctness curve" so it renders as CopilotKit generative UI inside the chat thread).
+Cut to the Weave tab (nested sessions), then to the skill diff (`history/v1` vs the
+latest, or the skill viewer).
 **Say:**
 > Now the part I care about. Every run is graded by Weave against that oracle. So Weave
 > is not just logging. With a hard oracle, it shows which sub-agent actually moved
@@ -73,8 +76,17 @@ sessions), then to the skill diff (`history/v1` vs the latest, or the skill view
 
 ## Optional generality beat (swap in, do not add)
 
-If you want to show it is not baked to the tokenizer, drop this 8-second line into beat 3
-(switch the task to **textkit**, click Launch) and trim beat 2 by a sentence to stay under time:
+If you want to show it is not baked to the tokenizer, drop one of these into beat 3 and
+trim beat 2 by a sentence to stay under time. The bring-your-own-repo version is the
+stronger "have you seen this before" moment, so prefer it if the run is reliable.
+
+**Bring your own repo (the strong proof), ~12 seconds.** Click **+ repo**, point it at a
+repo and a test command, Create, then Run climb:
+> And it is not baked to the tokenizer. I hand the same swarm a real repo and its test
+> suite. It discovers what is failing, fixes it with the model, no safety net, and the
+> pass-rate climbs. The score is whatever the swarm actually earned.
+
+**Textkit (the simple swap), ~8 seconds.** Switch the task to **textkit**, click Launch:
 > And the same swarm runs a completely different problem, a Python library graded by
 > pytest, with zero code changed.
 
