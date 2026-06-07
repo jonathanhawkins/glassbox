@@ -5,7 +5,7 @@
 // page-space layout so the controller (board.ts) can place shapes
 // deterministically and the overlays (legend, curve) stay in sync.
 
-import type { AgentStatus } from "@glassbox/contract";
+import type { AgentStatus, GlassboxEvent } from "@glassbox/contract";
 
 /** The capability taxonomy carried on bead_created / bead_claimed payloads. */
 export type Capability =
@@ -94,25 +94,27 @@ export const BEAD_H = 46;
  * Where each agent lane card sits, top-left corner in page space.
  *
  * The roster reads left-to-right as the live pipeline, mirroring the deck:
- * planner -> coordinator -> the 2x2 worker grid -> validator -> improver. The
- * single-lane agents are vertically centered on the worker grid's mid-line so
- * the whole row scans as one flow.
+ * planner -> coordinator -> the 2x2 worker grid -> validator -> improver. Each
+ * worker owns a dashed task dock directly beneath its lane (see `dockPos`), so
+ * the two worker rows are spaced apart to give those docks room. The single-lane
+ * agents are vertically centered on the worker+dock band so the row still scans
+ * as one flow.
  */
 export const AGENT_POS: Record<string, { x: number; y: number }> = {
-  planner: { x: 40, y: 96 },
-  coordinator: { x: 290, y: 96 },
+  planner: { x: 40, y: 230 },
+  coordinator: { x: 290, y: 230 },
   "worker-1": { x: 540, y: 40 },
   "worker-2": { x: 744, y: 40 },
-  "worker-3": { x: 540, y: 152 },
-  "worker-4": { x: 744, y: 152 },
-  validator: { x: 994, y: 96 },
-  improver: { x: 1244, y: 96 },
+  "worker-3": { x: 540, y: 290 },
+  "worker-4": { x: 744, y: 290 },
+  validator: { x: 994, y: 230 },
+  improver: { x: 1244, y: 230 },
 };
 
 /** The backlog grid (lower-left, under the planner) where new beads appear. */
 export const BACKLOG = {
   x: 40,
-  y: 300,
+  y: 348,
   cols: 2,
   gapX: BEAD_W + 16,
   gapY: BEAD_H + 14,
@@ -121,30 +123,51 @@ export const BACKLOG = {
 /** The "validated" grid (lower-right, under the validator) where done beads settle. */
 export const DONE_RAIL = {
   x: 994,
-  y: 300,
+  y: 348,
   cols: 2,
   gapX: BEAD_W + 16,
   gapY: BEAD_H + 12,
 };
 
 /** The whole framed board region (used to fit/zoom the camera). */
-export const BOARD_BOUNDS = { x: 0, y: 0, w: 1480, h: 580 };
+export const BOARD_BOUNDS = { x: 0, y: 0, w: 1480, h: 560 };
 
-/** Diagonal stagger (page px) when more than one bead sits on a worker. */
-export const LANE_STACK = { dx: 10, dy: 9 } as const;
+// --- Worker task docks ----------------------------------------------------
+// Each worker lane owns a dashed dock directly beneath it. Claimed beads land
+// inside that dock in a tidy vertical stack (one column, since the dock is lane
+// width and a bead nearly fills it) instead of floating off the card with a
+// diagonal offset. This makes "these tasks belong to this worker" unmistakable.
+
+/** Dock footprint (page px). Width matches the lane; height holds ~2 beads. */
+export const DOCK_W = LANE_W;
+export const DOCK_H = 116;
+/** Vertical gap between a worker lane and the top of its dock. */
+export const DOCK_GAP = 12;
+/** Inner padding of the dock and the gap between stacked beads. */
+const DOCK_PAD = 10;
+const DOCK_ROW_GAP = 8;
+
+/** Which agents get a task dock (the worker pool). */
+export function hasDock(agent: string): boolean {
+  return agent.startsWith("worker-");
+}
+
+/** Top-left of a worker's dock zone, in page space. */
+export function dockPos(worker: string): { x: number; y: number } {
+  const p = AGENT_POS[worker] ?? AGENT_POS["worker-1"];
+  return { x: p.x, y: p.y + LANE_H + DOCK_GAP };
+}
 
 /**
- * Where a task bead lands when a worker is working it. The bead overlays the
- * lower body of the worker card (centered horizontally, tucked just under the
- * agent name + status light, which stay visible along the top) so it reads as
- * "this task belongs to this worker" instead of floating below the lane.
- * Multiple beads on the same worker fan out with a small diagonal stagger.
+ * Where the bead in stack position `slot` lands inside a worker's dock: centered
+ * horizontally, stacked top-down. Slots beyond the dock's visible height keep
+ * stacking downward (rare; a worker usually holds a single task).
  */
-export function laneCenter(agent: string, stack = 0): { x: number; y: number } {
-  const p = AGENT_POS[agent] ?? AGENT_POS.coordinator;
+export function dockSlot(worker: string, slot = 0): { x: number; y: number } {
+  const d = dockPos(worker);
   return {
-    x: p.x + LANE_W / 2 - BEAD_W / 2 + stack * LANE_STACK.dx,
-    y: p.y + LANE_H - BEAD_H - 10 + stack * LANE_STACK.dy,
+    x: d.x + (DOCK_W - BEAD_W) / 2,
+    y: d.y + DOCK_PAD + slot * (BEAD_H + DOCK_ROW_GAP),
   };
 }
 
@@ -175,6 +198,86 @@ export type SkillState = {
   version: number;
   covered: string[];
   accuracy: number | null;
-  lastGap: { category: string; accuracy: number } | null;
+  lastGap: { category: string; accuracy: number; failed?: number } | null;
   lastAdded: string | null;
+  // Per-category exact-match failures the latest eval found (the data-driven
+  // signal behind which gap the improver fixes next). Biggest first.
+  failing: { category: string; failed: number }[];
 };
+
+// --- Agent Mail (the swarm's conversation) --------------------------------
+
+/**
+ * Avatar color per agent lane for the Agent Mail drawer. Workers get distinct
+ * cool tones; the per-message capability chip carries the category color
+ * separately (see CAP_COLORS).
+ */
+export const AGENT_COLORS: Record<string, string> = {
+  planner: "#a78bfa", // violet
+  coordinator: "#fbbf24", // amber
+  "worker-1": "#38bdf8",
+  "worker-2": "#22d3ee",
+  "worker-3": "#34d399",
+  "worker-4": "#f472b6",
+  validator: "#22c55e", // green
+  improver: "#fb7185", // rose
+  system: "#64748b",
+  all: "#64748b",
+};
+
+export function agentColor(agent: string | undefined): string {
+  if (agent && agent in AGENT_COLORS) return AGENT_COLORS[agent];
+  return "#64748b";
+}
+
+/**
+ * One agent-to-agent message, derived from an `agent_message` event. The swarm
+ * emits these at real handoffs (planner->coordinator, coordinator->worker,
+ * worker->validator, validator->improver, improver->planner); the drawer groups
+ * them by planner version so the v1->v7 climb reads as a growing conversation.
+ */
+export type MailMessage = {
+  ts: number;
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  kind: string;
+  cap?: string;
+  version: number;
+  bead_id?: string | null;
+  run_id: string;
+};
+
+/**
+ * Project a raw event-like record onto a MailMessage, or null if it is not a
+ * mail event. The single source of truth for the mapping, shared by the live
+ * path (toMail, from a typed GlassboxEvent) and the /api/mail hydration route
+ * (from raw stream JSON), so the two paths can never drift.
+ */
+export function projectMail(ev: Record<string, unknown>): MailMessage | null {
+  if (ev.type !== "agent_message") return null;
+  const p = (ev.payload ?? {}) as Record<string, unknown>;
+  return {
+    ts: typeof ev.ts === "number" ? ev.ts : 0,
+    from: typeof ev.agent === "string" ? ev.agent : "system",
+    to: typeof p.to === "string" ? p.to : "all",
+    subject:
+      typeof p.subject === "string"
+        ? p.subject
+        : typeof ev.title === "string"
+          ? ev.title
+          : "",
+    body: typeof p.body === "string" ? p.body : "",
+    kind: typeof p.kind === "string" ? p.kind : "note",
+    cap: typeof p.cap === "string" ? p.cap : undefined,
+    version: typeof ev.planner_version === "number" ? ev.planner_version : 0,
+    bead_id: typeof ev.bead_id === "string" ? ev.bead_id : null,
+    run_id: typeof ev.run_id === "string" ? ev.run_id : "",
+  };
+}
+
+/** Project an event onto a MailMessage, or null if it is not a mail event. */
+export function toMail(ev: GlassboxEvent): MailMessage | null {
+  return projectMail(ev as unknown as Record<string, unknown>);
+}

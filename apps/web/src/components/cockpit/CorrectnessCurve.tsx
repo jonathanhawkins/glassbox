@@ -52,22 +52,29 @@ export function CorrectnessCurve() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-1 flex items-baseline justify-between">
+      <div className="flex items-baseline justify-between gap-2">
         <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
           correctness curve
         </span>
-        <span className="text-[11px] tabular-nums text-slate-500">
-          {data.length ? `v1 to v${data[data.length - 1].version}` : "no runs yet"}
+        <span className="flex items-baseline gap-2 tabular-nums">
+          {latest !== null && (
+            <span className="text-[11px] font-medium text-cyan-300">
+              {(latest * 100).toFixed(1)}%
+            </span>
+          )}
+          <span className="text-[10px] text-slate-500">
+            {data.length ? `v1 to v${data[data.length - 1].version}` : "no runs yet"}
+          </span>
         </span>
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="-mb-1 min-h-0 flex-1">
         {data.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs text-slate-600">
             waiting for the first graded run
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -18 }}>
+            <AreaChart data={data} margin={{ top: 6, right: 4, bottom: 0, left: -18 }}>
               <defs>
                 <linearGradient id="gb-curve" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.55} />
@@ -116,11 +123,6 @@ export function CorrectnessCurve() {
           </ResponsiveContainer>
         )}
       </div>
-      {latest !== null && (
-        <div className="mt-1 text-right text-[11px] tabular-nums text-cyan-300">
-          latest {(latest * 100).toFixed(1)}%
-        </div>
-      )}
     </div>
   );
 }

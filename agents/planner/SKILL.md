@@ -28,7 +28,6 @@ category at a time) to evolve the plan.
 ascii
 punctuation
 numbers
-code
 unicode
 whitespace
 emoji
@@ -127,14 +126,12 @@ category tag and never invent a new one outside the allowed set.
 - v1 (baseline): covers only `ascii`. Intentionally incomplete so the eval fails
   the other six scoring categories and the improver has room to climb.
 
-## Revision v2: The planner skill is being updated to include punctuation handling. This change aims to improve the planner's overall accuracy. (2026-06-06)
+## Revision v2: The planner is being updated to improve accuracy with numbers. A new bead is being added to cover this category. (2026-06-06)
 
-## Revision v3: The planner is being updated to include a new bead that handles numbers to improve its accuracy. This change addresses the previous version's weakness in the numbers category. (2026-06-06)
+## Revision v3: The planner skill is being updated to include a new bead for emoji to improve accuracy. This change targets the largest failing gap in the previous evaluation. (2026-06-06)
 
-## Revision v4: The planner skill is being updated to include code coverage. This change aims to improve the planner's overall accuracy by addressing a previously unhandled input category. (2026-06-06)
+## Revision v4: The planner skill is being updated to include punctuation handling to improve accuracy. This addition aims to address the current failing gap in punctuation matching. (2026-06-06)
 
-## Revision v5: The planner is being updated to include a new bead for unicode to improve its accuracy. This change will help the planner to better handle unicode inputs. (2026-06-06)
+## Revision v5: The planner skill is being updated to include a new bead that covers unicode characters. This change aims to improve accuracy by addressing the largest failing gap in the previous version. (2026-06-06)
 
-## Revision v6: The planner skill is being updated to include a bead for whitespace to improve accuracy. This addition addresses a previous gap in coverage. (2026-06-06)
-
-## Revision v7: The planner skill is being updated to include a new category for emoji to improve its accuracy. This addition will help the planner to better handle inputs containing emojis. (2026-06-06)
+## Revision v6: The planner skill is being updated to improve accuracy by adding a bead to handle whitespace. This change addresses the largest failing gap in the previous evaluation. (2026-06-06)

@@ -51,7 +51,10 @@ const EDGES: Array<[string, string]> = [
 function feedbackPath() {
   const from = top("improver");
   const to = top("planner");
-  const lift = 78; // how high above the band the arc bows
+  // The side agents now sit on the worker+dock mid-line, so the arc has to lift
+  // clear over the top worker row (which starts well above them) to read as a
+  // distinct return path instead of slicing through the grid.
+  const lift = 200; // how high above the band the arc bows
   const cy = Math.min(from.y, to.y) - lift;
   return `M ${from.x} ${from.y} C ${from.x} ${cy}, ${to.x} ${cy}, ${to.x} ${to.y}`;
 }

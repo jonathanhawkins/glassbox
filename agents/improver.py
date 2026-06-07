@@ -119,7 +119,7 @@ _RATIONALE_REJECT = (
 
 
 def _llm_rationale(
-    from_version: int, category: str, accuracy: float
+    from_version: int, category: str, accuracy: float, failed: int = 0
 ) -> Optional[str]:
     """Ask the LLM for ONLY a one or two sentence rationale (plain prose).
 
@@ -142,9 +142,9 @@ def _llm_rationale(
             "role": "user",
             "content": (
                 f"The latest planner eval (v{from_version}) scored accuracy "
-                f"{accuracy:.2f}. The input category '{category}' was failing "
-                "because the plan did not cover it, so a bead to cover "
-                f"{category} is being added. Write the one or two sentence "
+                f"{accuracy:.2f}. The input category '{category}' was the biggest "
+                f"failing gap ({failed} lines failing exact match), so a bead to "
+                f"cover {category} is being added. Write the one or two sentence "
                 "rationale."
             ),
         },
@@ -178,6 +178,7 @@ def improve(
     accuracy: float,
     failed_categories: Optional[Iterable[str]] = None,
     caps: Optional[Iterable[str]] = None,
+    failing: Optional[Iterable[dict]] = None,
 ) -> dict[str, Any]:
     """Rewrite SKILL.md to cover the next failing category. Returns a summary.
 
@@ -201,7 +202,13 @@ def improve(
 
     text = current_skill()
     covered_before = skill.parse_coverage(text)
-    category = skill.next_missing_category(covered_before, failed_categories)
+    failing = list(failing) if failing else []
+    # Prefer the biggest real gap from the eval (data-driven, varies per run);
+    # fall back to the lowest-index missing category when no magnitudes are given.
+    if failing:
+        category = skill.next_gap_by_impact(covered_before, failing)
+    else:
+        category = skill.next_missing_category(covered_before, failed_categories)
 
     if category is None:
         # Full coverage already: nothing to improve. Snapshot defensively so the
@@ -216,21 +223,34 @@ def improve(
             "skill_path": str(SKILL_PATH),
         }
 
+    # How many lines of the chosen category the eval flagged (for the cockpit's
+    # "what the improver found" readout and the rationale prose).
+    chosen_failed = next(
+        (int(f.get("failed", 0)) for f in failing if f.get("category") == category),
+        0,
+    )
+
     # Emit the gap the cockpit animates (planner + improver pulse) BEFORE writing,
-    # so the board shows the diagnosis then the rewrite.
+    # so the board shows the diagnosis then the rewrite. The payload carries the
+    # full per-category breakdown so the UI can show what the eval found.
     bus.emit_type(
         "plan_gap_found",
         run_id,
         planner_version=planner_version,
         agent="improver",
         title=f"gap: {category} failing (accuracy {accuracy:.2f})",
-        payload={"category": category, "accuracy": accuracy},
+        payload={
+            "category": category,
+            "accuracy": accuracy,
+            "failed": chosen_failed,
+            "failing": failing,
+        },
     )
 
     # Clean structural edit (deterministic, canonical coverage block) plus an
     # LLM-authored plain-prose rationale (sanitized), with a templated fallback.
     grown = skill.add_category(text, category)
-    rationale = _llm_rationale(planner_version, category, accuracy)
+    rationale = _llm_rationale(planner_version, category, accuracy, chosen_failed)
     rewrite_source = "llm"
     if rationale is None:
         rationale = _fallback_rationale(planner_version, category, accuracy)
@@ -266,6 +286,17 @@ def improve(
             "rewrite_source": rewrite_source,
             "snapshot": str(snap_path),
         },
+    )
+
+    bus.emit_mail(
+        run_id,
+        "improver",
+        "planner",
+        f"Skill rewrite: +{category} (v{planner_version}->v{next_version})",
+        planner_version=next_version,
+        body=f"added a bead for {category}; you now cover {len(covered_after)}/7",
+        kind="rewrite",
+        cap=category,
     )
 
     return {

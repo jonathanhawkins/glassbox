@@ -14,7 +14,7 @@ import {
   type TLShapeId,
 } from "tldraw";
 
-import type { AgentShape, BeadShape } from "./shapes";
+import type { AgentShape, BeadShape, DockShape } from "./shapes";
 import {
   AGENT_POS,
   AGENT_ROLES,
@@ -22,10 +22,14 @@ import {
   BEAD_H,
   BEAD_W,
   BOARD_BOUNDS,
+  DOCK_H,
+  DOCK_W,
   DONE_RAIL,
   LANE_H,
   LANE_W,
-  laneCenter,
+  dockPos,
+  dockSlot,
+  hasDock,
   type BeadState,
   type SkillState,
 } from "./types";
@@ -58,6 +62,13 @@ const MAX_INSET_FRAC = { x: 0.62, y: 0.5 } as const;
 /** Clamp the fitted zoom so the board neither vanishes nor balloons. */
 const MIN_FIT_ZOOM = 0.06;
 const MAX_FIT_ZOOM = 1.5;
+
+// The left inset depends on the copilot panel (it overlays the canvas): reserve
+// room for the open panel so the planner lane is never hidden under it, and only
+// a thin margin when it is collapsed so the board fills the reclaimed width.
+// setCopilotOpen() swaps between these and reframes.
+const COPILOT_LEFT_OPEN = 384;
+const COPILOT_LEFT_COLLAPSED = 56;
 
 const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -96,12 +107,16 @@ export class BoardController {
   private editor: Editor;
   private beadByBeadId = new Map<string, BeadRecord>();
   private agentShapeId = new Map<string, TLShapeId>();
+  private dockShapeId = new Map<string, TLShapeId>();
   private workerResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private nextBacklogSlot = 0;
   private nextDoneSlot = 0;
   private routeIdx = 0; // fallback round-robin when an event lacks a worker agent
   private resizeObserver?: ResizeObserver;
   private reframeTimer?: ReturnType<typeof setTimeout>;
+  // Left screen-space inset (px) reserved for the copilot panel; updated by
+  // setCopilotOpen so the camera frames the board clear of the panel.
+  private leftInset = COPILOT_LEFT_OPEN;
 
   // Callbacks the Cockpit overlay listens to for header readouts.
   onGoal?: (goal: string) => void;
@@ -116,6 +131,7 @@ export class BoardController {
     accuracy: null,
     lastGap: null,
     lastAdded: null,
+    failing: [],
   };
 
   constructor(editor: Editor) {
@@ -143,6 +159,21 @@ export class BoardController {
         for (const agent of AGENTS) {
           const pos = AGENT_POS[agent];
           if (!pos) continue;
+          // Each worker gets a dashed task dock beneath its lane (drawn first so
+          // claimed beads stack on top of it).
+          if (hasDock(agent)) {
+            const dPos = dockPos(agent);
+            const dId = createShapeId(`dock:${agent}`);
+            this.dockShapeId.set(agent, dId);
+            this.editor.createShape<DockShape>({
+              id: dId,
+              type: "dock",
+              x: dPos.x,
+              y: dPos.y,
+              isLocked: true,
+              props: { w: DOCK_W, h: DOCK_H, worker: agent, active: false },
+            });
+          }
           const id = createShapeId(`agent:${agent}`);
           this.agentShapeId.set(agent, id);
           this.editor.createShape<AgentShape>({
@@ -212,6 +243,16 @@ export class BoardController {
   }
 
   /**
+   * Reserve more or less left inset for the copilot panel, then reframe. The
+   * cockpit calls this when the user collapses or expands the panel so the graph
+   * stays fully visible (and uses the reclaimed width when the panel is hidden).
+   */
+  setCopilotOpen(open: boolean) {
+    this.leftInset = open ? COPILOT_LEFT_OPEN : COPILOT_LEFT_COLLAPSED;
+    this.frameCamera();
+  }
+
+  /**
    * The viewport rectangle (screen px) that is clear of the floating docks, with
    * a margin. Dock insets scale down on small windows so the board never gets
    * squeezed to nothing. Returns null if the viewport is not measured yet.
@@ -220,7 +261,8 @@ export class BoardController {
     const vsb = this.editor.getViewportScreenBounds();
     if (!vsb || vsb.w < 1 || vsb.h < 1) return null;
 
-    let { left, right, top, bottom } = DOCK_INSETS;
+    let { right, top, bottom } = DOCK_INSETS;
+    let left = this.leftInset;
     const hSum = left + right;
     const hMax = vsb.w * MAX_INSET_FRAC.x;
     if (hSum > hMax) {
@@ -263,6 +305,7 @@ export class BoardController {
     }
     this.beadByBeadId.clear();
     this.agentShapeId.clear();
+    this.dockShapeId.clear();
     for (const t of this.workerResetTimers.values()) clearTimeout(t);
     this.workerResetTimers.clear();
     this.nextBacklogSlot = 0;
@@ -364,7 +407,7 @@ export class BoardController {
     return rec;
   }
 
-  /** Number of beads already parked on this worker lane (for the stagger). */
+  /** Number of beads currently parked in this worker's dock (for the stack). */
   private workerBeadCount(worker: string): number {
     let n = 0;
     for (const rec of this.beadByBeadId.values()) {
@@ -373,12 +416,35 @@ export class BoardController {
     return n;
   }
 
-  /** Park a bead onto a worker lane, fanning it out if others are already there. */
+  /** Brighten / dim a worker's dock frame based on whether it holds a task. */
+  private setDockActive(worker: string, active: boolean) {
+    const id = this.dockShapeId.get(worker);
+    if (!id) return;
+    const shape = this.editor.getShape(id) as DockShape | undefined;
+    if (!shape || shape.props.active === active) return;
+    this.editor.run(
+      () =>
+        this.editor.updateShape<DockShape>({
+          id,
+          type: "dock",
+          props: { active },
+        }),
+      { ignoreShapeLock: true },
+    );
+  }
+
+  /** Park a bead into a worker's dock, stacking it under any tasks already there. */
   private placeOnWorker(rec: BeadRecord, worker: string, opts: AnimateOpts = ANIM) {
     rec.worker = worker;
     const stack = this.workerBeadCount(worker) - 1; // this rec is now counted
-    const c = laneCenter(worker, Math.max(0, stack));
+    const c = dockSlot(worker, Math.max(0, stack));
     this.moveBead(rec, c.x, c.y, opts);
+    this.setDockActive(worker, true);
+  }
+
+  /** Drop a worker's dock back to idle once its last task has left. */
+  private releaseDockIfEmpty(worker: string) {
+    if (this.workerBeadCount(worker) === 0) this.setDockActive(worker, false);
   }
 
   private resolveWorker(ev: GlassboxEvent): string {
@@ -456,9 +522,11 @@ export class BoardController {
         const rec = this.ensureBead(ev.bead_id, cap, ev.title ?? "", "working");
         const worker = ev.agent && WORKER_POOL.includes(ev.agent) ? ev.agent : null;
         this.updateBeadState(rec, "done");
-        // It leaves the worker lane, so it no longer counts toward that
-        // worker's stack (the next claim there starts from the card again).
+        // It leaves the worker's dock, so it no longer counts toward that
+        // worker's stack (the next claim there starts from the top slot again).
+        const leftDock = rec.worker;
         rec.worker = undefined;
+        if (leftDock) this.releaseDockIfEmpty(leftDock);
         // Park it on the validated rail (heading toward the validator).
         if (rec.doneSlot < 0) rec.doneSlot = this.nextDoneSlot++;
         const p = this.donePos(rec.doneSlot);
@@ -478,11 +546,12 @@ export class BoardController {
           if (rec.doneSlot >= 0) this.updateBeadState(rec, "passed");
         }
         this.setAgentStatus("validator", "done");
+        this.skill.failing = readFailing(ev);
         if (acc !== null) {
           this.onFinished?.(acc);
           this.skill.accuracy = acc;
-          this.publishSkill();
         }
+        this.publishSkill();
         break;
       }
 
@@ -495,23 +564,44 @@ export class BoardController {
         const bounceId = `${ev.bead_id ?? "fail"}:retry:${Math.random().toString(36).slice(2, 6)}`;
         const rec = this.ensureBead(bounceId, cap, "retry", "failed");
         this.updateBeadState(rec, "failed");
+        const failing = readFailing(ev);
+        this.skill.failing = failing;
         if (acc !== null) {
           this.onFinished?.(acc);
           this.skill.accuracy = acc;
         }
-        if (failedCats.length) this.skill.lastGap = { category: failedCats[0], accuracy: acc ?? 0 };
+        const topGap = failing[0];
+        if (topGap)
+          this.skill.lastGap = {
+            category: topGap.category,
+            accuracy: acc ?? 0,
+            failed: topGap.failed,
+          };
+        else if (failedCats.length)
+          this.skill.lastGap = { category: failedCats[0], accuracy: acc ?? 0 };
         this.publishSkill();
         break;
       }
 
       case "plan_gap_found": {
-        // The Weave eval flagged a failing category: pulse it on the skill strip.
+        // The Weave eval flagged a failing category: pulse it on the skill strip
+        // and surface the full per-category breakdown ("what the improver found").
         this.setAgentStatus("planner", "working");
         this.setAgentStatus("improver", "working");
+        const failing = readFailing(ev);
+        if (failing.length) this.skill.failing = failing;
         const category = String(ev.payload?.category ?? "");
         const gacc = numAccuracy(ev);
+        const failed =
+          Number(ev.payload?.failed) ||
+          failing.find((f) => f.category === category)?.failed ||
+          0;
         if (category) {
-          this.skill.lastGap = { category, accuracy: gacc ?? this.skill.accuracy ?? 0 };
+          this.skill.lastGap = {
+            category,
+            accuracy: gacc ?? this.skill.accuracy ?? 0,
+            failed,
+          };
           this.skill.lastAdded = null;
           this.publishSkill();
         }
@@ -541,6 +631,10 @@ export class BoardController {
           this.skill.covered = [...this.skill.covered, added];
         this.skill.lastAdded = typeof added === "string" ? added : null;
         this.skill.lastGap = null;
+        if (typeof added === "string")
+          this.skill.failing = this.skill.failing.filter(
+            (f) => f.category !== added,
+          );
         if (typeof ev.planner_version === "number") this.skill.version = ev.planner_version;
         this.publishSkill();
         break;
@@ -637,6 +731,19 @@ export class BoardController {
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;
   }
+}
+
+function readFailing(
+  ev: GlassboxEvent,
+): { category: string; failed: number }[] {
+  const raw = ev.payload?.failing;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((f) => ({
+      category: String((f as { category?: unknown })?.category ?? ""),
+      failed: Number((f as { failed?: unknown })?.failed) || 0,
+    }))
+    .filter((f) => f.category);
 }
 
 function numAccuracy(ev: GlassboxEvent): number | null {

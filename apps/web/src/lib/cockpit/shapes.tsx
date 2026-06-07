@@ -19,6 +19,8 @@ import {
   AGENT_ROLES,
   BEAD_H,
   BEAD_W,
+  DOCK_H,
+  DOCK_W,
   LANE_H,
   LANE_W,
   STATUS_COLORS,
@@ -40,6 +42,12 @@ declare module "@tldraw/tlschema" {
       agent: string;
       role: string;
       status: string;
+    };
+    dock: {
+      w: number;
+      h: number;
+      worker: string;
+      active: boolean;
     };
     bead: {
       w: number;
@@ -180,6 +188,100 @@ export class AgentShapeUtil extends BaseBoxShapeUtil<AgentShape> {
           >
             {status}
           </div>
+        </div>
+      </HTMLContainer>
+    );
+  }
+}
+
+// --- DockShape ------------------------------------------------------------
+// The dashed "task dock" that sits beneath each worker lane. Claimed beads land
+// inside it so the ownership reads at a glance. Purely decorative: a framed drop
+// zone, brightened while the worker is holding a task.
+
+export type DockShape = TLBaseShape<
+  "dock",
+  {
+    w: number;
+    h: number;
+    worker: string;
+    active: boolean;
+  }
+>;
+
+export class DockShapeUtil extends BaseBoxShapeUtil<DockShape> {
+  static override type = "dock" as const;
+
+  static override props: RecordProps<DockShape> = {
+    w: T.number,
+    h: T.number,
+    worker: T.string,
+    active: T.boolean,
+  };
+
+  override getDefaultProps(): DockShape["props"] {
+    return { w: DOCK_W, h: DOCK_H, worker: "worker-1", active: false };
+  }
+
+  override canResize() {
+    return false;
+  }
+  override hideRotateHandle() {
+    return true;
+  }
+  override hideSelectionBoundsBg() {
+    return true;
+  }
+  override canEdit() {
+    return false;
+  }
+
+  override getGeometry(shape: DockShape) {
+    return new Rectangle2d({
+      width: shape.props.w,
+      height: shape.props.h,
+      isFilled: false,
+    });
+  }
+
+  override getIndicatorPath(shape: DockShape): Path2D {
+    const path = new Path2D();
+    path.rect(0, 0, shape.props.w, shape.props.h);
+    return path;
+  }
+
+  override component(shape: DockShape) {
+    const { w, h, active } = shape.props;
+    const edge = active ? "rgba(245,158,11,0.55)" : "rgba(148,163,184,0.30)";
+    return (
+      <HTMLContainer>
+        <div
+          style={{
+            width: w,
+            height: h,
+            boxSizing: "border-box",
+            borderRadius: 14,
+            border: `1.5px dashed ${edge}`,
+            background: active
+              ? "rgba(245,158,11,0.05)"
+              : "rgba(148,163,184,0.03)",
+            boxShadow: active
+              ? "inset 0 0 18px rgba(245,158,11,0.10)"
+              : "none",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "flex-start",
+            padding: "5px 9px",
+            color: active ? "rgba(245,158,11,0.75)" : "rgba(148,163,184,0.45)",
+            fontFamily: "var(--font-geist-mono, ui-monospace, monospace)",
+            fontSize: 9,
+            letterSpacing: 1.4,
+            textTransform: "uppercase",
+            pointerEvents: "none",
+            transition: "border-color 240ms ease, background 240ms ease, color 240ms ease",
+          }}
+        >
+          tasks
         </div>
       </HTMLContainer>
     );

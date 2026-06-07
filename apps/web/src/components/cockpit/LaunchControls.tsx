@@ -9,7 +9,7 @@ import { useCallback, useState } from "react";
 
 const DEFAULT_GOAL = "port the BPE tokenizer to Rust";
 
-type Kind = "run" | "loop" | "live";
+type Kind = "run" | "loop" | "live" | "reset";
 
 export function LaunchControls() {
   const [goal, setGoal] = useState(DEFAULT_GOAL);
@@ -53,6 +53,30 @@ export function LaunchControls() {
   const runLive = () =>
     post("/api/live", { goal: goal || DEFAULT_GOAL, injections: 2 }, "live", "Live inject");
 
+  // Reset clears the live curve/board so the demo can restart clean, then reloads
+  // so the cockpit re-hydrates from the cleared state.
+  const resetBoard = useCallback(async () => {
+    setBusy("reset");
+    setNote("Resetting...");
+    try {
+      const res = await fetch("/api/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (res.ok) {
+        setNote("reset");
+        window.location.reload();
+      } else {
+        setNote(`reset failed (${res.status})`);
+        setBusy(null);
+      }
+    } catch (err) {
+      setNote(`reset failed: ${err instanceof Error ? err.message : "network"}`);
+      setBusy(null);
+    }
+  }, []);
+
   return (
     <div className="flex flex-col gap-2">
       <input
@@ -84,6 +108,13 @@ export function LaunchControls() {
         className="w-full rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:opacity-50"
       >
         {busy === "live" ? "Injecting..." : "Run live (inject)"}
+      </button>
+      <button
+        onClick={resetBoard}
+        disabled={busy !== null}
+        className="w-full rounded-lg border border-slate-700/60 bg-slate-900/50 px-3 py-1.5 text-[11px] font-medium text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200 disabled:opacity-50"
+      >
+        {busy === "reset" ? "Resetting..." : "Reset board"}
       </button>
       {note && <span className="truncate text-[10px] text-slate-500">{note}</span>}
     </div>

@@ -37,6 +37,7 @@ SKILL coverage as-is".
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -291,12 +292,22 @@ def plan(
     base_spec = _plan_from_coverage(covered, allowed_caps=allowed_caps)
     required_caps = {b["capability"] for b in base_spec}
 
-    # Let the LLM phrase the beads, but only for EXACTLY the required cap set.
-    source = "llm"
-    spec = _plan_from_llm(goal, required_caps)
-    if spec is None:
-        spec = base_spec
-        source = "skill-canonical"
+    # By default we use the canonical SKILL titles (base_spec) so beads are
+    # created instantly. The LLM only ever phrases titles (the cap SET is
+    # deterministic), so the ~10s LLM call is opt-in: set GLASSBOX_PLANNER_LLM
+    # to 1/true/yes to let the LLM phrase the beads (still validated to EXACTLY
+    # the required cap set, falling back to base_spec if it returns None).
+    spec = base_spec
+    source = "skill-canonical"
+    if os.environ.get("GLASSBOX_PLANNER_LLM", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        llm_spec = _plan_from_llm(goal, required_caps)
+        if llm_spec is not None:
+            spec = llm_spec
+            source = "llm"
 
     ordered = _topo_sort(spec)
     if ordered is not None:
@@ -351,6 +362,22 @@ def plan(
                 "dep_ids": dep_ids,
             }
         )
+
+    caps_in_plan: list[str] = []
+    for b in result:
+        c = b["capability"]
+        if c and c not in caps_in_plan:
+            caps_in_plan.append(c)
+    bus.emit_mail(
+        run_id,
+        "planner",
+        "coordinator",
+        f"Plan ready: {len(result)} beads",
+        planner_version=planner_version,
+        body=f"covering {', '.join(caps_in_plan)} (v{planner_version})",
+        kind="dispatch",
+        extra={"beads": [{"id": b["id"], "cap": b["capability"]} for b in result]},
+    )
 
     bus.set_agent_status(run_id, "planner", "done", planner_version=planner_version)
     return result

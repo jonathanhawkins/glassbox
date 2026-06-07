@@ -9,6 +9,7 @@
     "eventsStream": "glassbox:events",
     "plannerScores": "glassbox:planner_scores",
     "beadsState": "glassbox:beads",
+    "skillState": "glassbox:skill",
     "runsList": "glassbox:runs",
     "runMetaPrefix": "glassbox:run:"
   },
@@ -24,6 +25,7 @@
     "validation_failed",
     "planner_rewrite",
     "run_finished",
+    "agent_message",
     "agent_status",
     "log"
   ],

@@ -60,36 +60,22 @@ body {
   background: transparent;
 }
 
-/* --- Copilot dock typography -------------------------------------------------
-   The CopilotKit v2 chat renders its welcome message as a 24px h1, which is far
-   too loud for the narrow (~380px) cockpit dock and reads like a page headline.
-   Right-size it into a calm, ambient status line that fits the glass cockpit. */
-.glassbox-copilot-chat h1 {
-  font-size: 0.9375rem !important; /* 15px */
-  line-height: 1.45 !important;
-  font-weight: 500 !important;
-  letter-spacing: -0.01em;
-  color: var(--color-slate-300, #cbd5e1) !important;
-  max-width: 30ch;
-  margin-inline: auto;
-  text-wrap: balance;
-}
+/* --- Copilot dock polish -----------------------------------------------------
+   The empty state (welcome intro, suggestion pills, composer placement) is now
+   driven by the v2 slot system in CockpitCopilot.tsx, so the old !important
+   overrides of the stock welcome <h1> and chip spacing are gone. What remains
+   are a few light touches for the conversation state in the narrow rail. */
 
-/* Tighten the empty-state spacing so the welcome + chips sit comfortably in the
-   short dock instead of pushing the input toward the bottom edge. */
-.glassbox-copilot-chat h1 + *,
-.glassbox-copilot-chat .cpk\:mb-6 {
-  margin-bottom: 1rem !important;
-}
-
-/* Calmer placeholder + comfortable input size for the small panel. */
+/* Comfortable composer typography for the small panel. */
 .glassbox-copilot-chat textarea,
 .glassbox-copilot-chat input[type="text"] {
   font-size: 0.875rem !important; /* 14px */
   line-height: 1.4 !important;
 }
 
-/* The footer disclaimer is noise in a live demo dock; dim it right down. */
-.glassbox-copilot-chat .cpk\:text-muted-foreground {
-  opacity: 0.6;
+/* Top breathing room for the scrolling message stream so the first reply does
+   not butt against the dock header. (Side insets are already handled by the
+   chat's own max-w content wrapper.) */
+.glassbox-copilot-chat .copilotKitMessages {
+  padding-top: 0.5rem;
 }

@@ -78,6 +78,54 @@ function Flow() {
   return <span className="font-mono text-lg text-slate-600">{"->"}</span>;
 }
 
+// The real gpt2 tokenization of one corpus-style sentence, used to demystify
+// what the swarm is actually building. Token pieces and IDs are exact (decoded
+// from harness/data/gpt2.tiktoken), not illustrative.
+const SAMPLE_TOKENS: { t: string; id: number; punct?: boolean }[] = [
+  { t: "She", id: 3347 },
+  { t: " said", id: 531 },
+  { t: ",", id: 11, punct: true },
+  { t: ' "', id: 366, punct: true },
+  { t: "It", id: 1026 },
+  { t: "'s", id: 338, punct: true },
+  { t: " a", id: 257 },
+  { t: " beautiful", id: 4950 },
+  { t: " day", id: 1110 },
+  { t: ",", id: 11, punct: true },
+  { t: " isn", id: 2125 },
+  { t: "'t", id: 470, punct: true },
+  { t: " it", id: 340 },
+  { t: '?"', id: 1701, punct: true },
+];
+
+/** One token: the exact text piece on top, its integer ID below. */
+function TokenChip({
+  t,
+  id,
+  punct = false,
+}: {
+  t: string;
+  id: number;
+  punct?: boolean;
+}) {
+  const a = ACCENTS[punct ? "violet" : "cyan"];
+  // Render a leading space as a visible, dimmed marker so the audience sees
+  // that the space is part of the token (the surprising, memorable detail).
+  const lead = t.startsWith(" ");
+  const body = lead ? t.slice(1) : t;
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div
+        className={`rounded-lg border ${a.border} ${a.bg} px-2.5 py-1.5 font-mono text-lg ${a.text}`}
+      >
+        {lead && <span className="text-slate-600">{"␣"}</span>}
+        <span className="whitespace-pre">{body}</span>
+      </div>
+      <span className="font-mono text-xs tabular-nums text-slate-500">{id}</span>
+    </div>
+  );
+}
+
 /** A labeled row in a feature list with an accent tick. */
 function Point({
   accent = "cyan",
@@ -197,36 +245,83 @@ export const SLIDES: Slide[] = [
           truth.
         </Title>
         <div className="mt-10 grid gap-5 md:grid-cols-2">
-          <Panel accent="cyan" className="p-6">
-            <div className="mb-2 font-mono text-sm uppercase tracking-[0.18em] text-cyan-300/80">
-              the target
-            </div>
-            <p className="text-xl leading-relaxed text-slate-300">
-              A tokenizer. We picked it because it gives us{" "}
-              <span className="text-cyan-300">ground truth</span>: an exact,
-              un-gameable token-ID diff.
-            </p>
-          </Panel>
           <Panel accent="violet" className="p-6">
             <div className="mb-2 font-mono text-sm uppercase tracking-[0.18em] text-violet-300/80">
               the product
             </div>
             <p className="text-xl leading-relaxed text-slate-300">
-              The <span className="text-violet-300">swarm</span> and the{" "}
-              <span className="text-violet-300">cockpit</span>. The thing you run
-              over any agent swarm today.
+              <span className="text-violet-300">Glassbox</span> is a general
+              self-improvement harness. You point it at any agent swarm and watch
+              it get better at the job, live.
+            </p>
+          </Panel>
+          <Panel accent="cyan" className="p-6">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.18em] text-cyan-300/80">
+              the target (just the proof)
+            </div>
+            <p className="text-xl leading-relaxed text-slate-300">
+              A tokenizer. Not the point, the proof. We picked it for{" "}
+              <span className="text-cyan-300">ground truth</span>: an exact,
+              un-gameable token-ID diff a swarm cannot bluff.
             </p>
           </Panel>
         </div>
-        <p className="mt-8 text-pretty text-lg text-slate-400">
-          The tokenizer is the measuring stick. Glassbox is the instrument
-          panel.
+        <p className="mt-8 text-pretty text-xl leading-relaxed text-slate-300">
+          Glassbox is{" "}
+          <span className="text-slate-100">not a tokenizer tool</span>. It is the
+          machine we have run for months, pointed at a target small enough to
+          finish and prove in a weekend.
         </p>
       </SlideShell>
     ),
   },
 
-  // 4. The swarm + coordination
+  // 4. What a tokenizer actually does (the normie-proof explainer)
+  {
+    id: "tokenizer-101",
+    title: "What it builds",
+    accent: "cyan",
+    render: () => (
+      <SlideShell accent="cyan">
+        <Eyebrow accent="cyan">in plain english</Eyebrow>
+        <Title>A tokenizer chops text into the numbers an AI reads.</Title>
+
+        <Lede>
+          Models never see letters. They see token IDs. The tokenizer is the
+          translator, and there is exactly one right answer for every sentence.
+        </Lede>
+
+        <Panel accent="cyan" className="mt-9 p-7">
+          <div className="mb-5 text-center font-mono text-2xl text-slate-100">
+            She said, &quot;It&apos;s a beautiful day, isn&apos;t it?&quot;
+          </div>
+
+          <div className="mb-2 flex justify-center">
+            <span className="font-mono text-2xl text-slate-600">{"|"}</span>
+          </div>
+          <div className="mb-5 text-center font-mono text-xs uppercase tracking-[0.2em] text-cyan-300/70">
+            gpt2 byte-pair encoding
+          </div>
+
+          <div className="flex flex-wrap items-start justify-center gap-2.5">
+            {SAMPLE_TOKENS.map((tok, i) => (
+              <TokenChip key={i} t={tok.t} id={tok.id} punct={tok.punct} />
+            ))}
+          </div>
+        </Panel>
+
+        <p className="mt-7 text-pretty text-lg text-slate-400">
+          Notice the pieces are weird: the space rides with the word,{" "}
+          <Mono accent="violet">&apos;t</Mono> and{" "}
+          <Mono accent="violet">?&quot;</Mono> are their own tokens. Get a single
+          ID wrong and the whole line fails. That is what makes it the perfect,
+          un-gameable scorecard.
+        </p>
+      </SlideShell>
+    ),
+  },
+
+  // 5. The swarm + coordination
   {
     id: "swarm",
     title: "The swarm",

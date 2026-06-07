@@ -1,3 +1,5 @@
 packages:
   - apps/*
   - contract
+patchedDependencies:
+  '@copilotkit/runtime': patches/@copilotkit__runtime.patch

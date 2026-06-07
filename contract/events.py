@@ -18,6 +18,7 @@ REDIS: dict[str, str] = _CONTRACT["redis"]
 EVENTS_STREAM: str = REDIS["eventsStream"]
 PLANNER_SCORES: str = REDIS["plannerScores"]
 BEADS_STATE: str = REDIS["beadsState"]
+SKILL_STATE: str = REDIS["skillState"]
 RUNS_LIST: str = REDIS["runsList"]
 RUN_META_PREFIX: str = REDIS["runMetaPrefix"]
 

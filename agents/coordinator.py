@@ -26,6 +26,14 @@ from . import beads, bus  # noqa: E402
 
 DEFAULT_WORKERS = ["worker-1", "worker-2", "worker-3", "worker-4"]
 
+# Round-robin cursor that PERSISTS across assign_ready calls (waves), so beads
+# are spread across the whole worker pool instead of always restarting at
+# worker-1. Without this, a wave with a single ready bead (e.g. the ascii
+# foundation, the harness join, or a small climb version) would land on worker-1
+# every time; with it, successive beads rotate worker-1 -> worker-2 -> ... and a
+# wide wave still fans out across all free workers at once.
+_next_worker = 0
+
 
 def _capability_of(bead: dict[str, Any]) -> str:
     """Extract the capability tag the planner stored in the bead body.
@@ -53,13 +61,17 @@ def assign_ready(
     ``working``. Returns the list of {bead_id, title, capability, assignee}
     assignments made this pass (empty when nothing is ready).
     """
+    global _next_worker
     pool = workers or DEFAULT_WORKERS
     assignments: list[dict[str, Any]] = []
-    for i, bead in enumerate(beads.ready()):
+    for bead in beads.ready():
         bead_id = bead.get("id")
         if not bead_id:
             continue
-        assignee = pool[i % len(pool)]
+        # Hand each bead to the next worker in the rotation (persists across
+        # waves), so work spreads to whoever is free, not always worker-1.
+        assignee = pool[_next_worker % len(pool)]
+        _next_worker += 1
         capability = _capability_of(bead)
         beads.claim(bead_id, assignee=assignee)
         bus.emit_type(
@@ -70,6 +82,17 @@ def assign_ready(
             bead_id=bead_id,
             title=bead.get("title", ""),
             payload={"capability": capability},
+        )
+        bus.emit_mail(
+            run_id,
+            "coordinator",
+            assignee,
+            f"Assigned: {bead.get('title', '') or capability or 'task'}",
+            planner_version=planner_version,
+            bead_id=bead_id,
+            body=f"{capability or 'task'} · {bead_id.split('-')[-1]}",
+            kind="assign",
+            cap=capability or None,
         )
         bus.set_agent_status(
             run_id, assignee, "working", planner_version=planner_version

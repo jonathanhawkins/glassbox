@@ -36,33 +36,37 @@ function fmtTime(ts: number): string {
 }
 
 export function EventsTicker({ events }: { events: GlassboxEvent[] }) {
-  const recent = events.slice(0, 7);
+  // The rail now gives this panel real height, so show more history and let it
+  // scroll instead of hard-capping at a handful of rows.
+  const recent = events.slice(0, 40);
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="mb-1 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
+    <div className="flex h-full flex-col">
+      <span className="mb-1 shrink-0 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
         event feed
       </span>
       {recent.length === 0 ? (
         <span className="text-[11px] text-slate-600">no events yet</span>
       ) : (
-        recent.map((ev, i) => (
-          <div
-            key={`${ev.ts}-${i}`}
-            className="flex items-baseline gap-2 text-[11px] leading-tight"
-          >
-            <span className="tabular-nums text-slate-600">{fmtTime(ev.ts)}</span>
-            <span
-              className="font-medium"
-              style={{ color: TYPE_COLOR[ev.type] ?? "#94a3b8" }}
+        <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pr-1">
+          {recent.map((ev, i) => (
+            <div
+              key={`${ev.ts}-${i}`}
+              className="flex items-baseline gap-2 text-[11px] leading-tight"
             >
-              {ev.type}
-            </span>
-            <span className="truncate text-slate-400">
-              {ev.agent}
-              {ev.bead_id ? ` #${ev.bead_id.split("-").pop()}` : ""}
-            </span>
-          </div>
-        ))
+              <span className="tabular-nums text-slate-600">{fmtTime(ev.ts)}</span>
+              <span
+                className="font-medium"
+                style={{ color: TYPE_COLOR[ev.type] ?? "#94a3b8" }}
+              >
+                {ev.type}
+              </span>
+              <span className="truncate text-slate-400">
+                {ev.agent}
+                {ev.bead_id ? ` #${ev.bead_id.split("-").pop()}` : ""}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

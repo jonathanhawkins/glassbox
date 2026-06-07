@@ -32,8 +32,10 @@ import redis as _redis  # noqa: E402
 
 from contract.events import (  # noqa: E402
     AGENT_STATUS,
+    BEADS_STATE,
     EVENTS_STREAM,
     PLANNER_SCORES,
+    SKILL_STATE,
     make_event,
 )
 
@@ -80,6 +82,49 @@ def emit_type(
         payload=payload,
     )
     return emit(event)
+
+
+def emit_mail(
+    run_id: str,
+    frm: str,
+    to: str,
+    subject: str,
+    *,
+    planner_version: int = 0,
+    bead_id: Optional[str] = None,
+    body: str = "",
+    kind: str = "note",
+    cap: Optional[str] = None,
+    extra: Optional[dict[str, Any]] = None,
+) -> str:
+    """Emit an agent-to-agent message as an ``agent_message`` event.
+
+    A thin, honest messaging layer over the same Redis stream every other event
+    rides on: ``frm`` is the sending agent, ``payload.to`` the recipient, plus a
+    human subject/body and an optional capability tag. The cockpit's Agent Mail
+    drawer reconstructs the whole thread from these (durable in glassbox:events).
+    ``kind`` (dispatch/assign/done/grade-pass/grade-fail/rewrite) drives styling.
+    Returns the stream entry id, or "" if the emit failed. Mail is cosmetic, so a
+    transient Redis error must never abort a real handoff (e.g. strand a worker
+    wave mid-drain); failures are swallowed.
+    """
+    try:
+        payload: dict[str, Any] = {"to": to, "subject": subject, "body": body, "kind": kind}
+        if cap:
+            payload["cap"] = cap
+        if extra:
+            payload.update(extra)
+        return emit_type(
+            "agent_message",
+            run_id,
+            planner_version=planner_version,
+            agent=frm,
+            bead_id=bead_id,
+            title=subject,
+            payload=payload,
+        )
+    except Exception:  # noqa: BLE001 - mail is cosmetic; never break a handoff
+        return ""
 
 
 def set_agent_status(
@@ -132,3 +177,24 @@ def get_leaderboard() -> list[tuple[int, float]]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+def reset_state() -> dict[str, int]:
+    """Clear the live demo state so the next run starts from a clean board.
+
+    Deletes the event stream (which also carries the agent_message mail thread),
+    the planner leaderboard, the bead mirror, the skill mirror, and every per-run
+    cap set (glassbox:run:*). Returns a small count summary. The cockpit Reset
+    button calls this (via the server) between demo runs.
+    """
+    client = get_client()
+    deleted = 0
+    # SKILL_STATE is intentionally cleared too: a stale full-coverage mirror
+    # surviving a reset is more confusing than a brief gap. The next run re-seeds
+    # it (the climb's snapshot / a fresh plan), so the empty window is momentary.
+    for key in (EVENTS_STREAM, PLANNER_SCORES, BEADS_STATE, SKILL_STATE):
+        deleted += int(client.delete(key) or 0)
+    run_keys = list(client.scan_iter(match="glassbox:run:*", count=200))
+    if run_keys:
+        deleted += int(client.delete(*run_keys) or 0)
+    return {"deleted": deleted}

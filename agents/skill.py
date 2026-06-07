@@ -192,6 +192,38 @@ def next_missing_category(
     return missing[0]
 
 
+def next_gap_by_impact(
+    covered: Iterable[str],
+    failing: Optional[Iterable[dict]] = None,
+) -> Optional[str]:
+    """Pick the missing category with the MOST failing lines (the biggest gap).
+
+    ``failing`` is the validator's per-category breakdown (a list of dicts with
+    ``category`` and ``failed``). Among categories missing from ``covered``,
+    returns the one with the highest ``failed`` count, breaking ties by
+    CATEGORY_ORDER. Falls back to ``next_missing_category`` (lowest index) when no
+    failing magnitudes are available, so the loop still progresses. This is what
+    makes the climb data-driven: the order follows the real eval failures, which
+    vary run to run.
+    """
+    have = set(covered)
+    missing = [c for c in CATEGORY_ORDER if c not in have]
+    if not missing:
+        return None
+    counts: dict[str, int] = {}
+    for f in failing or []:
+        if not isinstance(f, dict):
+            continue
+        cat = f.get("category")
+        if isinstance(cat, str) and cat in _VALID:
+            counts[cat] = int(f.get("failed", 0) or 0)
+    ranked = [c for c in missing if counts.get(c, 0) > 0]
+    if not ranked:
+        return next_missing_category(covered)
+    ranked.sort(key=lambda c: (-counts.get(c, 0), CATEGORY_ORDER.index(c)))
+    return ranked[0]
+
+
 def reset_to_baseline() -> str:
     """Copy SKILL.baseline.md over SKILL.md and return the live text.
 
@@ -204,6 +236,26 @@ def reset_to_baseline() -> str:
     parse_coverage(baseline_text)  # validate before we clobber the live file
     write_skill(baseline_text, SKILL_PATH)
     return baseline_text
+
+
+def reset_history() -> int:
+    """Delete every history/v*.md snapshot. Returns how many were removed.
+
+    Used by the cockpit Reset so the planner skill genuinely starts over: after
+    this the only history is whatever the caller snapshots next (typically v1 of
+    the baseline), not the stale v2..vN from a previous climb.
+    """
+    if not HISTORY_DIR.is_dir():
+        return 0
+    removed = 0
+    for p in HISTORY_DIR.glob("v*.md"):
+        if re.fullmatch(r"v(\d+)\.md", p.name):
+            try:
+                p.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 def snapshot(version: int, text: Optional[str] = None) -> Path:

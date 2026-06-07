@@ -61,33 +61,29 @@ def accumulated_capabilities(run_id: str) -> set[str]:
     return set(members) if members else set()
 
 
+def accumulate(run_id: str, capability: str) -> None:
+    """Record a bead's category into the run's covered set (no-op if empty)."""
+    if capability:
+        bus.get_client().sadd(_caps_key(run_id), capability)
+
+
 @weave.op()
-def run_bead(
+def complete_bead(
     run_id: str,
     bead_id: str,
     capability: str,
     agent: str = "worker-1",
     planner_version: int = 1,
 ) -> dict[str, Any]:
-    """Implement one bead: add its category, close the bead, emit bead_done.
+    """Finish one already-claimed bead: close it and emit ``bead_done``.
 
-    Records the bead's capability into the run's Redis set, emits agent_status
-    ``working`` then ``bead_done``, and closes the bead so the dependency graph
-    advances and the validator has a covered-category set to grade against. The
-    real Rust edits are not performed here; the category gating in the tokenizer
-    plus this accumulation is what makes the curve move honestly.
+    This is the second half of working a bead (the first half is claiming it and
+    flipping the worker to ``working``). It does NOT pace or touch agent status,
+    so a whole WAVE of beads can be completed together (see run._drain_graph):
+    every worker in the wave stays lit while the shared pace elapses, then all
+    their beads finish at once. Assumes the capability was already accumulated.
     """
-    bus.set_agent_status(run_id, agent, "working", planner_version=planner_version)
-
-    if capability:
-        bus.get_client().sadd(_caps_key(run_id), capability)
-
-    # Pace the bead in flight so the cockpit can show the chip move (demo only;
-    # 0 in the overnight loop). Sits between bead_claimed -> bead_done.
-    _pace_sleep()
-
     beads.close(bead_id, reason=f"{agent} implemented capability={capability}")
-
     caps_sorted = sorted(accumulated_capabilities(run_id))
     bus.emit_type(
         "bead_done",
@@ -97,5 +93,46 @@ def run_bead(
         bead_id=bead_id,
         payload={"capability": capability, "caps": caps_sorted},
     )
-    bus.set_agent_status(run_id, agent, "idle", planner_version=planner_version)
+    bus.emit_mail(
+        run_id,
+        agent,
+        "validator",
+        f"Done: {capability or 'task'}",
+        planner_version=planner_version,
+        bead_id=bead_id,
+        body=f"bead {bead_id.split('-')[-1]} implemented, ready to grade",
+        kind="done",
+        cap=capability or None,
+    )
     return {"bead_id": bead_id, "capability": capability, "caps": caps_sorted}
+
+
+@weave.op()
+def run_bead(
+    run_id: str,
+    bead_id: str,
+    capability: str,
+    agent: str = "worker-1",
+    planner_version: int = 1,
+) -> dict[str, Any]:
+    """Implement one bead end to end: claim-light, accumulate, pace, close, done.
+
+    Records the bead's capability into the run's Redis set, emits agent_status
+    ``working`` then ``bead_done``, and closes the bead so the dependency graph
+    advances and the validator has a covered-category set to grade against. The
+    real Rust edits are not performed here; the category gating in the tokenizer
+    plus this accumulation is what makes the curve move honestly.
+
+    This is the single-bead convenience (used by the live inject beat). The main
+    drain works a whole wave in parallel via ``accumulate`` + ``complete_bead``.
+    """
+    bus.set_agent_status(run_id, agent, "working", planner_version=planner_version)
+    accumulate(run_id, capability)
+
+    # Pace the bead in flight so the cockpit can show the chip move (demo only;
+    # 0 in the overnight loop). Sits between bead_claimed -> bead_done.
+    _pace_sleep()
+
+    result = complete_bead(run_id, bead_id, capability, agent, planner_version)
+    bus.set_agent_status(run_id, agent, "idle", planner_version=planner_version)
+    return result

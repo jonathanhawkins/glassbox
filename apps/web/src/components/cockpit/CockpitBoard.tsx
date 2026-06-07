@@ -12,15 +12,16 @@ import { Tldraw, type Editor, type TLComponents } from "tldraw";
 import "tldraw/tldraw.css";
 
 import type { GlassboxEvent } from "@glassbox/contract";
-import type { SkillState } from "@/lib/cockpit/types";
+import { toMail, type MailMessage, type SkillState } from "@/lib/cockpit/types";
 
 import { BoardController } from "@/lib/cockpit/board";
 import { RoutingEdges } from "@/lib/cockpit/RoutingEdges";
-import { AgentShapeUtil, BeadShapeUtil } from "@/lib/cockpit/shapes";
+import { AgentShapeUtil, BeadShapeUtil, DockShapeUtil } from "@/lib/cockpit/shapes";
 
 import { CorrectnessCurve } from "./CorrectnessCurve";
 import { EventsTicker } from "./EventsTicker";
 import { LaunchControls } from "./LaunchControls";
+import { AgentMailDrawer } from "./AgentMailDrawer";
 import { Legend } from "./Legend";
 import { PlannerSkillPanel } from "./PlannerSkillPanel";
 
@@ -37,9 +38,11 @@ const CockpitCopilot = dynamic(() => import("./CockpitCopilot"), {
 });
 
 const MAX_TICKER = 60;
+// Cap the in-session mail buffer; full history rehydrates from /api/mail on load.
+const MAX_MAIL = 500;
 
 // Custom shape utils, defined once outside render (tldraw requires a stable ref).
-const SHAPE_UTILS = [AgentShapeUtil, BeadShapeUtil];
+const SHAPE_UTILS = [AgentShapeUtil, DockShapeUtil, BeadShapeUtil];
 
 // Hide all default tldraw chrome and draw our routing edges on the canvas.
 const TL_COMPONENTS: TLComponents = {
@@ -75,6 +78,18 @@ export default function CockpitBoard() {
   const [events, setEvents] = useState<GlassboxEvent[]>([]);
   const [sseOpen, setSseOpen] = useState(false);
   const [skill, setSkill] = useState<SkillState | null>(null);
+  const [copilotOpen, setCopilotOpen] = useState(true);
+  // Reframe the board when the copilot collapses or expands so the planner lane
+  // is never hidden under the panel (and the board fills the width when hidden).
+  useEffect(() => {
+    controllerRef.current?.setCopilotOpen(copilotOpen);
+  }, [copilotOpen]);
+  const [messages, setMessages] = useState<MailMessage[]>([]);
+  const [mailOpen, setMailOpen] = useState(false);
+  const [mailUnread, setMailUnread] = useState(0);
+  // Read inside the SSE callback (which closes over initial state) to decide
+  // whether an arriving message should bump the unread badge.
+  const mailOpenRef = useRef(false);
 
   const handleMount = useCallback((editor: Editor) => {
     const controller = new BoardController(editor);
@@ -117,6 +132,19 @@ export default function CockpitBoard() {
       } catch {
         // no skill snapshot yet is fine
       }
+      // Hydrate the full mail thread once. Assumes the live SSE is forward-only
+      // (it tails new events from "$"), so hydrate and live never overlap and no
+      // per-message de-dup is needed. If the SSE is ever switched to replay from
+      // 0, carry the stream-id into MailMessage and de-dup here.
+      try {
+        const res = await fetch("/api/mail", { cache: "no-store" });
+        const rows = (await res.json()) as MailMessage[];
+        if (Array.isArray(rows) && rows.length) {
+          setMessages(rows.slice(-MAX_MAIL));
+        }
+      } catch {
+        // no mail yet is fine
+      }
     })();
 
     return () => {
@@ -143,6 +171,17 @@ export default function CockpitBoard() {
           return;
         }
         controllerRef.current?.apply(ev);
+        const mail = toMail(ev);
+        if (mail) {
+          // Mail goes to the drawer, not the ticker. Accumulate (full history
+          // rehydrates from /api/mail) and bump the badge while the drawer is shut.
+          setMessages((prev) => {
+            const next = [...prev, mail];
+            return next.length > MAX_MAIL ? next.slice(next.length - MAX_MAIL) : next;
+          });
+          if (!mailOpenRef.current) setMailUnread((n) => n + 1);
+          return;
+        }
         setEvents((prev) => {
           const next = [ev as GlassboxEvent, ...prev];
           return next.length > MAX_TICKER ? next.slice(0, MAX_TICKER) : next;
@@ -166,6 +205,12 @@ export default function CockpitBoard() {
       if (es) es.close();
     };
   }, []);
+
+  // Mirror mailOpen into a ref for the SSE callback, and clear unread on open.
+  useEffect(() => {
+    mailOpenRef.current = mailOpen;
+    if (mailOpen) setMailUnread(0);
+  }, [mailOpen]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#060a14]">
@@ -212,6 +257,22 @@ export default function CockpitBoard() {
         </div>
 
         <div className="pointer-events-auto flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setMailOpen(true)}
+            title="Agent Mail: the swarm's conversation"
+            className="relative rounded-xl border border-cyan-500/30 bg-cyan-500/5 px-3 py-1.5 text-center backdrop-blur transition-colors hover:bg-cyan-500/10"
+          >
+            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
+              agent mail
+            </div>
+            <div className="text-sm font-semibold text-cyan-300">inbox</div>
+            {mailUnread > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">
+                {mailUnread > 99 ? "99+" : mailUnread}
+              </span>
+            )}
+          </button>
           <div className="rounded-xl border border-slate-700/60 bg-slate-900/70 px-3 py-1.5 text-center backdrop-blur">
             <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">
               planner
@@ -231,39 +292,67 @@ export default function CockpitBoard() {
         </div>
       </header>
 
-      {/* Left controls + legend dock. */}
-      <div className="pointer-events-none absolute bottom-5 left-5 z-20 flex w-[280px] flex-col gap-3">
-        <div className="pointer-events-auto rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
-          <LaunchControls />
-        </div>
-        <div className="pointer-events-auto rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
-          <Legend />
-        </div>
-      </div>
-
-      {/* Right rail: curve on top, the CopilotKit command bar filling the rail,
-          and a compact live event strip at the bottom. */}
-      <aside className="pointer-events-none absolute bottom-5 right-5 top-28 z-20 flex w-[380px] flex-col gap-3">
-        <div className="pointer-events-auto h-[210px] shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
-          <CorrectnessCurve />
-        </div>
-        {/* CopilotKit command bar (generative UI chat). Drives runs by chat and
-            renders the curve / leaderboard inline. */}
-        <div className="pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-cyan-500/25 bg-slate-950/70 backdrop-blur">
-          <div className="flex items-center justify-between border-b border-slate-800/70 px-3 py-2">
+      {/* Left rail: the CopilotKit command bar gets the whole column so the chat
+          has room to think (generative UI, the approval card, the curve render
+          inline) instead of being squeezed between the curve and the feed. */}
+      <aside
+        className={`pointer-events-none absolute bottom-5 left-5 top-28 z-20 flex flex-col gap-3 ${
+          copilotOpen ? "w-[360px]" : "w-auto"
+        }`}
+      >
+        {copilotOpen ? (
+          <div className="pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-cyan-500/25 bg-slate-950/70 backdrop-blur">
+            <div className="flex items-center justify-between border-b border-slate-800/70 px-3 py-2">
+              <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-cyan-300/90">
+                copilot
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[9px] text-cyan-300/90">
+                  live
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCopilotOpen(false)}
+                  title="Collapse the copilot to see the graph"
+                  className="rounded-md border border-slate-700/60 bg-slate-900/60 px-1.5 py-0.5 text-[10px] text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200"
+                >
+                  hide
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <CockpitCopilot />
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setCopilotOpen(true)}
+            title="Expand the copilot"
+            className="pointer-events-auto flex items-center gap-2 self-start rounded-2xl border border-cyan-500/25 bg-slate-950/70 px-3 py-2 backdrop-blur transition hover:bg-slate-900/70"
+          >
             <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-cyan-300/90">
               copilot
             </span>
-            <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[9px] text-cyan-300/90">
-              live
-            </span>
-          </div>
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <CockpitCopilot />
-          </div>
+            <span className="text-[11px] text-cyan-300/90">show</span>
+          </button>
+        )}
+      </aside>
+
+      {/* Right rail: the money-shot curve up top, the operator controls + legend
+          (the chat's manual fallback), and the live event strip filling the rest. */}
+      <aside className="pointer-events-none absolute bottom-5 right-5 top-28 z-20 flex w-[360px] flex-col gap-3">
+        <div className="pointer-events-auto h-[200px] shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
+          <CorrectnessCurve />
         </div>
-        {/* Compact live event strip. */}
-        <div className="pointer-events-auto h-[150px] shrink-0 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
+        <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
+          <LaunchControls />
+        </div>
+        <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
+          <Legend />
+        </div>
+        {/* Compact live event strip fills the remaining rail height. */}
+        <div className="pointer-events-auto min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
           <EventsTicker events={events} />
         </div>
       </aside>
@@ -274,6 +363,13 @@ export default function CockpitBoard() {
           <PlannerSkillPanel skill={skill} />
         </div>
       )}
+
+      {/* Agent Mail: the swarm's conversation, grouped by planner version. */}
+      <AgentMailDrawer
+        open={mailOpen}
+        messages={messages}
+        onClose={() => setMailOpen(false)}
+      />
     </div>
   );
 }

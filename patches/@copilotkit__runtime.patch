@@ -1,0 +1,158 @@
+diff --git a/dist/agent/converters/aisdk.cjs b/dist/agent/converters/aisdk.cjs
+index 7e2fe0064295e5bf297c9715011f27b4330c45b2..7f3e3a6596a71156cc34895d76780f389d44a66d 100644
+--- a/dist/agent/converters/aisdk.cjs
++++ b/dist/agent/converters/aisdk.cjs
+@@ -50,6 +50,21 @@ async function* convertAISDKStream(fullStream, abortSignal) {
+ 			messageId: reasoningMessageId
+ 		};
+ 	}
++	// Emit TOOL_CALL_END for any tool call that was started but never closed
++	// (some providers finish a streamed tool call without a trailing
++	// `tool-call` part), so the caller's RUN_FINISHED is not rejected by
++	// AG-UI's verifier.
++	function* closeOpenToolCalls() {
++		for (const [toolCallId, state] of toolCallStates) {
++			if (state.started && !state.ended) {
++				state.ended = true;
++				yield {
++					type: _ag_ui_client.EventType.TOOL_CALL_END,
++					toolCallId
++				};
++			}
++		}
++	}
+ 	try {
+ 		for await (const part of fullStream) {
+ 			const p = part;
+@@ -207,6 +222,7 @@ async function* convertAISDKStream(fullStream, abortSignal) {
+ 		}
+ 	} finally {
+ 		yield* closeReasoningIfOpen();
++		yield* closeOpenToolCalls();
+ 	}
+ }
+ 
+diff --git a/dist/agent/converters/aisdk.mjs b/dist/agent/converters/aisdk.mjs
+index 33d0825dbbc98d3e34f98c75b0cfb9991b45a642..632b8599e8c2030760dd2ac868ec44f4d8d0080a 100644
+--- a/dist/agent/converters/aisdk.mjs
++++ b/dist/agent/converters/aisdk.mjs
+@@ -49,6 +49,21 @@ async function* convertAISDKStream(fullStream, abortSignal) {
+ 			messageId: reasoningMessageId
+ 		};
+ 	}
++	// Emit TOOL_CALL_END for any tool call that was started but never closed
++	// (some providers finish a streamed tool call without a trailing
++	// `tool-call` part), so the caller's RUN_FINISHED is not rejected by
++	// AG-UI's verifier.
++	function* closeOpenToolCalls() {
++		for (const [toolCallId, state] of toolCallStates) {
++			if (state.started && !state.ended) {
++				state.ended = true;
++				yield {
++					type: EventType.TOOL_CALL_END,
++					toolCallId
++				};
++			}
++		}
++	}
+ 	try {
+ 		for await (const part of fullStream) {
+ 			const p = part;
+@@ -206,6 +221,7 @@ async function* convertAISDKStream(fullStream, abortSignal) {
+ 		}
+ 	} finally {
+ 		yield* closeReasoningIfOpen();
++		yield* closeOpenToolCalls();
+ 	}
+ }
+ 
+diff --git a/dist/agent/index.cjs b/dist/agent/index.cjs
+index a6f2ec635357831fa3fe030accdd2254ed923f1f..329fac356663b5ef0dbb174411ccceca6311b7d4 100644
+--- a/dist/agent/index.cjs
++++ b/dist/agent/index.cjs
+@@ -522,6 +522,24 @@ This is state from the application that you can edit by calling AGUISendStateSna
+ 						}
+ 						return state;
+ 					};
++					// Some OpenAI-compatible providers (e.g. W&B Inference / Llama)
++					// finish a streamed tool call with tool-input-* parts but never a
++					// trailing `tool-call` part, so the TOOL_CALL_END is never emitted
++					// and AG-UI's verifier rejects the following RUN_FINISHED
++					// ("Cannot send 'RUN_FINISHED' while tool calls are still active").
++					// Emit the missing TOOL_CALL_END for any still-open tool call before
++					// any RUN_FINISHED so the event stream is well-formed.
++					const closeOpenToolCalls = () => {
++						for (const [toolCallId, state] of toolCallStates) {
++							if (state.started && !state.ended) {
++								state.ended = true;
++								subscriber.next({
++									type: _ag_ui_client.EventType.TOOL_CALL_END,
++									toolCallId
++								});
++							}
++						}
++					};
+ 					for await (const part of response.fullStream) {
+ 						if (part.type !== "reasoning-delta") closeReasoningIfOpen();
+ 						switch (part.type) {
+@@ -692,6 +710,7 @@ This is state from the application that you can edit by calling AGUISendStateSna
+ 								break;
+ 							}
+ 							case "finish": {
++								closeOpenToolCalls();
+ 								const finishedEvent = {
+ 									type: _ag_ui_client.EventType.RUN_FINISHED,
+ 									threadId: input.threadId,
+@@ -721,6 +740,7 @@ This is state from the application that you can edit by calling AGUISendStateSna
+ 					}
+ 					if (!terminalEventEmitted) {
+ 						closeReasoningIfOpen();
++						closeOpenToolCalls();
+ 						if (abortController.signal.aborted) {} else {
+ 							const finishedEvent = {
+ 								type: _ag_ui_client.EventType.RUN_FINISHED,
+diff --git a/dist/agent/index.mjs b/dist/agent/index.mjs
+index 924d0b12d6957f3c17de6ec99690203030457330..4a7bf633dbe7eb16bce9a562ef8732622089ac11 100644
+--- a/dist/agent/index.mjs
++++ b/dist/agent/index.mjs
+@@ -521,6 +521,24 @@ This is state from the application that you can edit by calling AGUISendStateSna
+ 						}
+ 						return state;
+ 					};
++					// Some OpenAI-compatible providers (e.g. W&B Inference / Llama)
++					// finish a streamed tool call with tool-input-* parts but never a
++					// trailing `tool-call` part, so the TOOL_CALL_END is never emitted
++					// and AG-UI's verifier rejects the following RUN_FINISHED
++					// ("Cannot send 'RUN_FINISHED' while tool calls are still active").
++					// Emit the missing TOOL_CALL_END for any still-open tool call before
++					// any RUN_FINISHED so the event stream is well-formed.
++					const closeOpenToolCalls = () => {
++						for (const [toolCallId, state] of toolCallStates) {
++							if (state.started && !state.ended) {
++								state.ended = true;
++								subscriber.next({
++									type: EventType.TOOL_CALL_END,
++									toolCallId
++								});
++							}
++						}
++					};
+ 					for await (const part of response.fullStream) {
+ 						if (part.type !== "reasoning-delta") closeReasoningIfOpen();
+ 						switch (part.type) {
+@@ -691,6 +709,7 @@ This is state from the application that you can edit by calling AGUISendStateSna
+ 								break;
+ 							}
+ 							case "finish": {
++								closeOpenToolCalls();
+ 								const finishedEvent = {
+ 									type: EventType.RUN_FINISHED,
+ 									threadId: input.threadId,
+@@ -720,6 +739,7 @@ This is state from the application that you can edit by calling AGUISendStateSna
+ 					}
+ 					if (!terminalEventEmitted) {
+ 						closeReasoningIfOpen();
++						closeOpenToolCalls();
+ 						if (abortController.signal.aborted) {} else {
+ 							const finishedEvent = {
+ 								type: EventType.RUN_FINISHED,
