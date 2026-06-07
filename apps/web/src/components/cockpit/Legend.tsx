@@ -12,6 +12,15 @@ import { useTaskGroups } from "@/lib/cockpit/useTaskGroups";
 
 export function Legend({ activeTask }: { activeTask: TaskName }) {
   const { order } = useTaskGroups(activeTask);
+  if (order.length === 0) {
+    // BYO task still discovering its groups (or a backend outage): show a muted
+    // placeholder instead of an empty, invisible legend.
+    return (
+      <span className="text-[10px] tracking-wide text-slate-500">
+        groups appear after the first eval
+      </span>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
       {order.map((group) => {

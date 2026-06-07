@@ -34,6 +34,9 @@ export function PlannerSkillPanel({
   // live skill state below, so the strip keeps climbing in lockstep with the curve.
   const { order, unit } = useTaskGroups(activeTask);
   const total = order.length;
+  // A BYO task has no groups until the backend runs its suite once. total === 0
+  // means we are still discovering them (curated tasks always have groups).
+  const discovering = total === 0;
   const gap = skill.lastGap?.category ?? null;
   const added = skill.lastAdded;
   const failingMap = new Map(skill.failing.map((f) => [f.category, f.failed]));
@@ -41,7 +44,9 @@ export function PlannerSkillPanel({
   const gapCount = skill.lastGap?.failed ?? (gap ? failingMap.get(gap) : undefined);
 
   let narration: string;
-  if (added) {
+  if (discovering) {
+    narration = "discovering test groups from the first run...";
+  } else if (added) {
     narration = `rewrote SKILL.md: added a bead for ${added}`;
   } else if (gap) {
     narration = `Weave eval: ${gap} is the biggest gap${
@@ -89,7 +94,20 @@ export function PlannerSkillPanel({
       </div>
 
       <div className="flex items-stretch gap-1.5">
-        {order.map((cat) => {
+        {discovering &&
+          [0, 1, 2, 3].map((i) => (
+            <div
+              key={`skeleton-${i}`}
+              className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-amber-500/20 bg-amber-500/5 px-1 py-2"
+              style={{ animation: "gb-pulse 1.4s ease-in-out infinite", animationDelay: `${i * 120}ms` }}
+            >
+              <span className="h-2 w-2 rounded-full bg-amber-400/50" />
+              <span className="text-[9px] leading-none text-amber-300/50">...</span>
+              <span className="text-[8px] leading-none text-slate-700">-</span>
+            </div>
+          ))}
+        {!discovering &&
+          order.map((cat) => {
           const isCovered = covered.has(cat);
           const isGap = !isCovered && gap === cat;
           const isAdded = added === cat;

@@ -296,10 +296,30 @@ export function agentColor(agent: string | undefined): string {
 }
 
 /**
+ * An advisory file lease (Agent Mail reservation) a worker holds while it edits a
+ * workspace file. Surfaced in the expanded mail detail so the reservation is
+ * legible: which file, exclusive or shared, and when it expires.
+ */
+export type MailLease = {
+  path?: string;
+  exclusive?: boolean;
+  expires?: string | null;
+  reason?: string | null;
+  id?: number | string;
+};
+
+/**
  * One agent-to-agent message, derived from an `agent_message` event. The swarm
  * emits these at real handoffs (planner->coordinator, coordinator->worker,
- * worker->validator, validator->improver, improver->planner); the drawer groups
- * them by planner version so the v1->v7 climb reads as a growing conversation.
+ * worker->validator, validator->improver, improver->planner), and `lease` rows
+ * when a worker reserves a file; the drawer groups them by planner version so the
+ * v1->v7 climb reads as a growing conversation.
+ *
+ * The fields below `run_id` are the genuine Agent Mail record (present when the
+ * message was actually sent over the Agent Mail server): the real message id, the
+ * registered identities behind the logical roles, the verified-sender flag, and
+ * any file leases. The drawer reveals them when a row is expanded. `real` is false
+ * when the row is a Redis-only mirror (Agent Mail server was unavailable).
  */
 export type MailMessage = {
   ts: number;
@@ -312,6 +332,17 @@ export type MailMessage = {
   version: number;
   bead_id?: string | null;
   run_id: string;
+  // Agent Mail record (optional; present on genuinely-sent messages / leases).
+  real?: boolean;
+  mailId?: number | string | null;
+  threadId?: string | null;
+  fromId?: string | null;
+  toId?: string | null;
+  importance?: string | null;
+  verified?: boolean;
+  projectSlug?: string | null;
+  leases?: MailLease[];
+  conflicts?: { path?: string; holders?: string[] }[];
 };
 
 /**
@@ -323,6 +354,9 @@ export type MailMessage = {
 export function projectMail(ev: Record<string, unknown>): MailMessage | null {
   if (ev.type !== "agent_message") return null;
   const p = (ev.payload ?? {}) as Record<string, unknown>;
+  const num = (v: unknown): number | string | null =>
+    typeof v === "number" || typeof v === "string" ? v : null;
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
   return {
     ts: typeof ev.ts === "number" ? ev.ts : 0,
     from: typeof ev.agent === "string" ? ev.agent : "system",
@@ -339,6 +373,19 @@ export function projectMail(ev: Record<string, unknown>): MailMessage | null {
     version: typeof ev.planner_version === "number" ? ev.planner_version : 0,
     bead_id: typeof ev.bead_id === "string" ? ev.bead_id : null,
     run_id: typeof ev.run_id === "string" ? ev.run_id : "",
+    // The genuine Agent Mail record, when this handoff was really sent.
+    real: typeof p.real === "boolean" ? p.real : undefined,
+    mailId: num(p.mail_id),
+    threadId: str(p.thread_id),
+    fromId: str(p.from_id),
+    toId: str(p.to_id),
+    importance: str(p.importance),
+    verified: typeof p.verified === "boolean" ? p.verified : undefined,
+    projectSlug: str(p.project_slug),
+    leases: Array.isArray(p.leases) ? (p.leases as MailLease[]) : undefined,
+    conflicts: Array.isArray(p.conflicts)
+      ? (p.conflicts as { path?: string; holders?: string[] }[])
+      : undefined,
   };
 }
 

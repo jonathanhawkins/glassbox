@@ -33,20 +33,20 @@ import "@copilotkit/react-core/v2/styles.css";
 
 import { CopilotActions } from "./CopilotActions";
 import { useActiveTask } from "@/lib/cockpit/ActiveTaskContext";
-import { TASK_GOALS, type TaskName } from "@/lib/cockpit/tasks";
+import { defaultGoalFor, type TaskName } from "@/lib/cockpit/tasks";
 
 // Operating instructions for the model, grounded on the ACTIVE task so the copilot
 // talks about (and triggers a build for) the task the operator selected, not always
 // the tokenizer. The tool-usage rules are task-agnostic; only the goal varies.
 function systemInstructions(task: TaskName): string {
-  const goal = TASK_GOALS[task];
+  const goal = defaultGoalFor(task);
   return [
     `You are Glassbox mission control: the operator's copilot for a self-improving agent swarm. The current task is to ${goal}, and the swarm grades itself against a hard, checkable oracle (an exact-match diff or a real test suite).`,
     "To start a build, call the launch tools. Do not just describe what you would do, actually call the tool.",
     `Use launchClimb for the genuine self-improvement loop run immediately (the headline demo): '${goal}', 'improve', 'climb', 'run the loop', 'just run it', or 'go' should call launchClimb.`,
     "Use proposeImprovement (human in the loop) when the operator wants to review or sign off before anything runs: 'propose the next improvement', 'what should we do next', or 'ask me before you run'. It renders an approval card and waits; approval launches the climb, so do not also call launchClimb.",
     "Use launchRun for a single full-plan one-shot run, and launchLive for the spot-a-gap inject beat where the swarm catches and patches a missing capability mid-run.",
-    "To show progress, render the charts: call showCorrectnessCurve to draw the climbing accuracy curve in the chat, and showLeaderboard to show the per-version accuracy table.",
+    "To show progress, render the charts: call showCorrectnessCurve to draw the climbing accuracy curve in the chat, showLeaderboard to show the per-version accuracy table, and showClimbMatrix to draw the category-by-version heatmap (the climb matrix) of which capabilities the swarm has closed.",
     "Keep replies short and concrete. After launching, tell the operator to watch the board and the curve climb.",
   ].join(" ");
 }
@@ -68,10 +68,11 @@ function MissionContext() {
 // and generative-UI charts.
 function Suggestions() {
   // The first chip follows the active task's goal (Port the BPE tokenizer to Rust /
-  // Build the textkit Python library); the other two are task-agnostic. Re-configured
-  // on task switch via the [task] dep.
+  // Build the textkit Python library); the rest are task-agnostic (approve a step,
+  // draw the curve, draw the climb matrix). Re-configured on task switch via the
+  // [task] dep.
   const task = useActiveTask();
-  const goal = TASK_GOALS[task];
+  const goal = defaultGoalFor(task);
   const goalTitle = goal.charAt(0).toUpperCase() + goal.slice(1);
   useConfigureSuggestions(
     {
@@ -85,6 +86,10 @@ function Suggestions() {
         {
           title: "Show the correctness curve",
           message: "Show the correctness curve",
+        },
+        {
+          title: "Show the climb matrix",
+          message: "Show the climb matrix",
         },
       ],
     },

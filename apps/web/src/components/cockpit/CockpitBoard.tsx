@@ -13,7 +13,7 @@ import "tldraw/tldraw.css";
 
 import type { GlassboxEvent } from "@glassbox/contract";
 import { toMail, type MailMessage, type SkillState } from "@/lib/cockpit/types";
-import { DEFAULT_TASK, TASK_GOALS, type TaskName } from "@/lib/cockpit/tasks";
+import { DEFAULT_TASK, defaultGoalFor, type TaskName } from "@/lib/cockpit/tasks";
 import { ActiveTaskProvider } from "@/lib/cockpit/ActiveTaskContext";
 
 import { BoardController } from "@/lib/cockpit/board";
@@ -21,6 +21,7 @@ import { RoutingEdges } from "@/lib/cockpit/RoutingEdges";
 import { AgentShapeUtil, BeadShapeUtil, DockShapeUtil } from "@/lib/cockpit/shapes";
 
 import { CorrectnessCurve } from "./CorrectnessCurve";
+import { LeaderboardPanel } from "./LeaderboardPanel";
 import { EventsTicker } from "./EventsTicker";
 import { LaunchControls } from "./LaunchControls";
 import { AgentMailDrawer } from "./AgentMailDrawer";
@@ -81,7 +82,7 @@ export default function CockpitBoard() {
   // Bumped once the controller mounts so the per-task hydration effect (below)
   // can run against it (and re-run on every task switch).
   const [controllerReady, setControllerReady] = useState(0);
-  const [goal, setGoal] = useState<string>(TASK_GOALS[DEFAULT_TASK]);
+  const [goal, setGoal] = useState<string>(defaultGoalFor(DEFAULT_TASK));
   const [version, setVersion] = useState<number>(1);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [events, setEvents] = useState<GlassboxEvent[]>([]);
@@ -100,6 +101,14 @@ export default function CockpitBoard() {
   // Read inside the SSE callback (which closes over initial state) to decide
   // whether an arriving message should bump the unread badge.
   const mailOpenRef = useRef(false);
+  // The single SSE subscription (deps []) closes over the initial activeTask, so
+  // mirror the live value here. The stream is global (every task's events ride
+  // glassbox:events) but the board, curve, and leaderboard are per-task, so the
+  // callback drops any event not stamped with the active task.
+  const activeTaskRef = useRef<TaskName>(activeTask);
+  useEffect(() => {
+    activeTaskRef.current = activeTask;
+  }, [activeTask]);
 
   const handleMount = useCallback((editor: Editor) => {
     const controller = new BoardController(editor);
@@ -156,7 +165,7 @@ export default function CockpitBoard() {
     if (!controller) return;
     // Reflect the active task's goal in the header immediately on switch (the SSE
     // onGoal later overrides it once a run emits its goal).
-    setGoal(TASK_GOALS[activeTask]);
+    setGoal(defaultGoalFor(activeTask));
     let cancelled = false;
     void (async () => {
       let lastVersion = 1;
@@ -222,6 +231,11 @@ export default function CockpitBoard() {
         } catch {
           return;
         }
+        // Per-task board over a global stream: drop events for any other task.
+        // Pre-multi-task events carry no task; treat those as the default task
+        // so an older swarm still drives the tokenizer board.
+        const evTask = (ev.task ?? DEFAULT_TASK) as TaskName;
+        if (evTask !== activeTaskRef.current) return;
         controllerRef.current?.apply(ev);
         const mail = toMail(ev);
         if (mail) {
@@ -417,6 +431,9 @@ export default function CockpitBoard() {
       <aside className="pointer-events-none absolute bottom-5 right-5 top-28 z-20 flex w-[360px] flex-col gap-3">
         <div className="pointer-events-auto h-[200px] shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
           <CorrectnessCurve activeTask={activeTask} />
+        </div>
+        <div className="pointer-events-auto max-h-[240px] shrink-0 overflow-hidden rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
+          <LeaderboardPanel activeTask={activeTask} />
         </div>
         <div className="pointer-events-auto shrink-0 rounded-2xl border border-slate-700/50 bg-slate-950/70 p-3 backdrop-blur">
           <LaunchControls activeTask={activeTask} onTaskChange={setActiveTask} />

@@ -24,9 +24,13 @@ import { useEffect, useRef, useState } from "react";
 import { useFrontendTool, useHumanInTheLoop } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 
-import { ChatCorrectnessCurve, ChatLeaderboard } from "./ChatCharts";
+import {
+  ChatClimbMatrix,
+  ChatCorrectnessCurve,
+  ChatLeaderboard,
+} from "./ChatCharts";
 import { useActiveTask } from "@/lib/cockpit/ActiveTaskContext";
-import { TASK_GOALS, type TaskName } from "@/lib/cockpit/tasks";
+import { defaultGoalFor, type TaskName } from "@/lib/cockpit/tasks";
 
 type LaunchResult =
   | { ok: true; kind: string; id: string }
@@ -219,7 +223,7 @@ function ImprovementApprovalCard({
     setPhase("approving");
     const r = await launch(
       "/api/loop",
-      { goal: TASK_GOALS[task], max_versions: 7, task },
+      { goal: defaultGoalFor(task), max_versions: 7, task },
       "climb",
     );
     await respond(
@@ -294,7 +298,7 @@ export function CopilotActions() {
   // chat-launched run targets it, and its default goal prefills the launch body,
   // so a climb started from the chat builds the same task the strip + curve show.
   const task = useActiveTask();
-  const goal = TASK_GOALS[task];
+  const goal = defaultGoalFor(task);
 
   // launchRun: one full-plan graded run (climbs toward ~100% in a single pass).
   useFrontendTool({
@@ -377,6 +381,19 @@ export function CopilotActions() {
     parameters: reasonSchema,
     handler: async () => "Rendered the correctness curve in the chat.",
     render: () => <ChatCorrectnessCurve />,
+  });
+
+  // showClimbMatrix: the headline generative-UI artifact. A category x version
+  // heatmap (the "climb matrix") showing the swarm closing one failing category per
+  // version, green filling in as a diagonal staircase. Backed by the real per-version
+  // by_group / covered breakdown from the Weave-graded leaderboard.
+  useFrontendTool({
+    name: "showClimbMatrix",
+    description:
+      "Render the climb matrix: a category-by-version heatmap showing which capability categories the swarm has closed at each planner version, climbing as a green staircase toward a fully-covered board. Call this directly with no extra input when the operator asks for the matrix, the heatmap, the category coverage, or which categories are passing/failing per version. Do not ask for clarification, just call it.",
+    parameters: reasonSchema,
+    handler: async () => "Rendered the climb matrix in the chat.",
+    render: () => <ChatClimbMatrix />,
   });
 
   // showLeaderboard: a compact table of {version, accuracy} in the chat.

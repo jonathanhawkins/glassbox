@@ -11,16 +11,13 @@
 // every launch body (the /api routes forward it), so a run, climb, live inject,
 // or reset all target the active task.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { TASK_GOALS, type TaskName } from "@/lib/cockpit/tasks";
+import { defaultGoalFor, type TaskName } from "@/lib/cockpit/tasks";
+import { useTasks } from "@/lib/cockpit/useTasks";
+import { NewTaskDialog } from "./NewTaskDialog";
 
 type Kind = "run" | "loop" | "live" | "reset";
-
-const TASKS: { id: TaskName; label: string }[] = [
-  { id: "tokenizer", label: "tokenizer" },
-  { id: "textkit", label: "textkit" },
-];
 
 export function LaunchControls({
   activeTask,
@@ -29,10 +26,27 @@ export function LaunchControls({
   activeTask: TaskName;
   onTaskChange: (task: TaskName) => void;
 }) {
-  const DEFAULT_GOAL = TASK_GOALS[activeTask];
+  const { tasks } = useTasks();
+  const activeMeta = useMemo(
+    () => tasks.find((t) => t.id === activeTask),
+    [tasks, activeTask],
+  );
+  const DEFAULT_GOAL = defaultGoalFor(activeTask, activeMeta);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [goal, setGoal] = useState(DEFAULT_GOAL);
   const [busy, setBusy] = useState<null | Kind>(null);
   const [note, setNote] = useState<string>("");
+
+  // Follow the active task's default goal when it changes (covers switches made
+  // outside the tab strip, e.g. the BYO dialog setting the active task directly).
+  // Keyed on the task id so it does not clobber the operator's own edits mid-task.
+  const lastTaskRef = useRef(activeTask);
+  useEffect(() => {
+    if (lastTaskRef.current !== activeTask) {
+      lastTaskRef.current = activeTask;
+      setGoal(defaultGoalFor(activeTask, activeMeta));
+    }
+  }, [activeTask, activeMeta]);
 
   const post = useCallback(
     async (path: string, body: unknown, kind: Kind, label: string) => {
@@ -89,10 +103,10 @@ export function LaunchControls({
     (task: TaskName) => {
       if (task === activeTask) return;
       onTaskChange(task);
-      setGoal(TASK_GOALS[task]);
+      setGoal(defaultGoalFor(task, tasks.find((t) => t.id === task)));
       setNote("");
     },
-    [activeTask, onTaskChange],
+    [activeTask, onTaskChange, tasks],
   );
 
   // Reset clears the live curve/board so the demo can restart clean, then reloads
@@ -131,8 +145,9 @@ export function LaunchControls({
           aria-label="active task"
           className="flex flex-1 rounded-lg border border-slate-700/70 bg-slate-900/60 p-0.5"
         >
-          {TASKS.map((t) => {
+          {tasks.map((t) => {
             const active = t.id === activeTask;
+            const byo = t.kind === "byo";
             return (
               <button
                 key={t.id}
@@ -141,18 +156,35 @@ export function LaunchControls({
                 aria-selected={active}
                 onClick={() => switchTask(t.id)}
                 disabled={busy !== null}
-                className={`flex-1 rounded-md px-2 py-1 text-[11px] font-medium transition disabled:opacity-50 ${
+                title={byo && t.repo ? t.repo : undefined}
+                className={`flex-1 truncate rounded-md px-2 py-1 text-[11px] font-medium transition disabled:opacity-50 ${
                   active
-                    ? "bg-cyan-500/15 text-cyan-200 shadow-[0_0_8px] shadow-cyan-500/20"
+                    ? byo
+                      ? "bg-amber-500/15 text-amber-200 shadow-[0_0_8px] shadow-amber-500/20"
+                      : "bg-cyan-500/15 text-cyan-200 shadow-[0_0_8px] shadow-cyan-500/20"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
-                {t.label}
+                {t.label ?? t.id}
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setNewTaskOpen(true)}
+            disabled={busy !== null}
+            title="Bring your own repo"
+            className="rounded-md px-2 py-1 text-[11px] font-semibold text-amber-300/80 transition hover:text-amber-200 disabled:opacity-50"
+          >
+            + repo
+          </button>
         </div>
       </div>
+      <NewTaskDialog
+        open={newTaskOpen}
+        onClose={() => setNewTaskOpen(false)}
+        onTaskChange={onTaskChange}
+      />
       <input
         value={goal}
         onChange={(e) => setGoal(e.target.value)}

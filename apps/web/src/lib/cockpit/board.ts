@@ -396,6 +396,26 @@ export class BoardController {
     );
   }
 
+  /**
+   * Paint every bead that has reached the validated rail (doneSlot >= 0) by its
+   * REAL per-category outcome from the latest grade, instead of greening the whole
+   * rail on the event type alone. A bead whose capability the oracle still fails
+   * stays "done" (blue: the work landed, but that category is not correct yet); a
+   * bead whose category passes turns "passed" (green). A bead greens only on a
+   * genuine match (accuracy > 0 and its category absent from the failing set), so
+   * a partial run shows real progress (the categories that pass) without ever
+   * looking fully green, and a full pass (accuracy 1.0, empty failing set) greens
+   * the whole rail. This is the honest mapping of the exact-match oracle onto the
+   * board: green means "this category matches ground truth", nothing less.
+   */
+  private gradeDoneBeads(failed: Set<string>, accuracy: number) {
+    for (const rec of this.beadByBeadId.values()) {
+      if (rec.doneSlot < 0) continue;
+      const passed = accuracy > 0 && !failed.has(rec.capability);
+      this.updateBeadState(rec, passed ? "passed" : "done");
+    }
+  }
+
   private moveBead(rec: BeadRecord, x: number, y: number, opts: AnimateOpts = ANIM) {
     this.editor.animateShape({ id: rec.shapeId, type: "bead", x, y }, opts);
     // Guarantee the landing. Beads are locked, and tldraw's animateShape settle
@@ -608,9 +628,12 @@ export class BoardController {
 
       case "validation_passed": {
         const acc = numAccuracy(ev);
-        for (const rec of this.beadByBeadId.values()) {
-          if (rec.doneSlot >= 0) this.updateBeadState(rec, "passed");
-        }
+        // Paint the validated rail by the REAL per-category outcome, not by the
+        // event type alone. A genuine pass carries no failing categories (and
+        // accuracy 1.0), so every validated bead greens; the per-category rule
+        // also means a stray sub-1.0 "passed" event could never green the whole
+        // rail behind a partial score.
+        this.gradeDoneBeads(failedCategorySet(ev), acc ?? 1);
         this.setAgentStatus("validator", "done");
         this.skill.failing = readFailing(ev);
         if (acc !== null) {
@@ -623,9 +646,14 @@ export class BoardController {
 
       case "validation_failed": {
         const acc = numAccuracy(ev);
+        const failedCats = (ev.payload?.failed_categories as string[]) ?? [];
+        // Show the truth of a partial grade: the categories that genuinely pass
+        // the oracle go green on the rail, the ones it still fails stay blue
+        // (done, not passed). The run did NOT pass, so the validator lane reads
+        // failed and the top gap bounces back as a fresh bead, never a green rail.
+        this.gradeDoneBeads(failedCategorySet(ev), acc ?? 0);
         this.setAgentStatus("validator", "failed");
         // Bounce the failure back into the backlog as a fresh highlighted bead.
-        const failedCats = (ev.payload?.failed_categories as string[]) ?? [];
         const cap = failedCats[0] ?? "harness";
         const bounceId = `${ev.bead_id ?? "fail"}:retry:${Math.random().toString(36).slice(2, 6)}`;
         const rec = this.ensureBead(bounceId, cap, "retry", "failed");
@@ -709,7 +737,7 @@ export class BoardController {
       case "run_finished": {
         const acc = numAccuracy(ev);
         this.setAgentStatus("coordinator", "done");
-        this.setAllAgentsDoneSoft();
+        this.setAllAgentsDoneSoft(acc);
         if (acc !== null) this.onFinished?.(acc);
         if (typeof ev.planner_version === "number") this.onPlannerVersion?.(ev.planner_version);
         if (acc !== null) this.skill.accuracy = acc;
@@ -744,11 +772,17 @@ export class BoardController {
     this.workerResetTimers.set(worker, t);
   }
 
-  private setAllAgentsDoneSoft() {
-    // On finish, leave idle lanes idle but mark the active pipeline as done.
-    for (const agent of ["planner", "coordinator", "validator"]) {
-      this.setAgentStatus(agent, "done");
-    }
+  private setAllAgentsDoneSoft(accuracy: number | null) {
+    // On finish, the planner and coordinator read "done": they completed this
+    // cycle's planning and routing (a completion signal, not a correctness claim).
+    // The validator lane instead reflects the GRADE: a sub-1.0 run stays "failed"
+    // (red), matching its validation_failed event and the exact-match bar, so a
+    // partial cycle never ends with a green validator. Only a genuine pass (or an
+    // unknown score, e.g. an aborted run) reads "done".
+    this.setAgentStatus("planner", "done");
+    this.setAgentStatus("coordinator", "done");
+    const validated = accuracy === null || accuracy >= 1;
+    this.setAgentStatus("validator", validated ? "done" : "failed");
   }
 
   // --- hydration ----------------------------------------------------------
@@ -812,6 +846,22 @@ function readFailing(
       failed: Number((f as { failed?: unknown })?.failed) || 0,
     }))
     .filter((f) => f.category);
+}
+
+/**
+ * The set of categories the latest grade still fails, unioned from the event's
+ * `failed_categories` list and the per-group `failing` breakdown. The board uses
+ * this to green only the genuinely-passing beads on a validated rail (see
+ * gradeDoneBeads), so a partial run is never painted uniformly green.
+ */
+function failedCategorySet(ev: GlassboxEvent): Set<string> {
+  const set = new Set<string>();
+  const fc = ev.payload?.failed_categories;
+  if (Array.isArray(fc)) {
+    for (const c of fc) if (typeof c === "string" && c) set.add(c);
+  }
+  for (const f of readFailing(ev)) set.add(f.category);
+  return set;
 }
 
 function numAccuracy(ev: GlassboxEvent): number | null {
