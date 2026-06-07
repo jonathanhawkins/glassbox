@@ -28,7 +28,7 @@ import {
   LANE_H,
   LANE_W,
   dockPos,
-  dockSlot,
+  dockSlotCentered,
   hasDock,
   type BeadState,
   type SkillState,
@@ -436,9 +436,17 @@ export class BoardController {
   /** Park a bead into a worker's dock, stacking it under any tasks already there. */
   private placeOnWorker(rec: BeadRecord, worker: string, opts: AnimateOpts = ANIM) {
     rec.worker = worker;
-    const stack = this.workerBeadCount(worker) - 1; // this rec is now counted
-    const c = dockSlot(worker, Math.max(0, stack));
-    this.moveBead(rec, c.x, c.y, opts);
+    // Re-center the worker's WHOLE task stack inside its dock, so each task sits
+    // fully within the dock area (a single task is centered, not hugging the top
+    // edge). The just-claimed bead flies in with `opts`; siblings nudge fast.
+    const own: BeadRecord[] = [];
+    for (const r of this.beadByBeadId.values()) {
+      if (r.worker === worker) own.push(r);
+    }
+    own.forEach((r, i) => {
+      const c = dockSlotCentered(worker, i, own.length);
+      this.moveBead(r, c.x, c.y, r === rec ? opts : ANIM_FAST);
+    });
     this.setDockActive(worker, true);
   }
 
@@ -504,7 +512,7 @@ export class BoardController {
         const rec = this.ensureBead(ev.bead_id, cap, ev.title ?? "", "backlog");
         const worker = this.resolveWorker(ev);
         this.updateBeadState(rec, "claimed");
-        this.placeOnWorker(rec, worker, ANIM);
+        this.placeOnWorker(rec, worker, ANIM_FAST);
         this.setAgentStatus(worker, "working");
         this.setAgentStatus("coordinator", "working");
         // Settle into working a beat after it lands on the lane.

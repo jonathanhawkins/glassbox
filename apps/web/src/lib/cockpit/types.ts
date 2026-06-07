@@ -171,6 +171,27 @@ export function dockSlot(worker: string, slot = 0): { x: number; y: number } {
   };
 }
 
+/**
+ * Where bead `slot` of a `count`-bead stack lands so the WHOLE stack is
+ * vertically centered inside the dock (a single task sits in the middle of the
+ * dock instead of hugging the top edge). Horizontal centering matches dockSlot,
+ * so a task always reads as fully inside its worker's dock.
+ */
+export function dockSlotCentered(
+  worker: string,
+  slot: number,
+  count: number,
+): { x: number; y: number } {
+  const d = dockPos(worker);
+  const n = Math.max(1, count);
+  const stackH = n * BEAD_H + (n - 1) * DOCK_ROW_GAP;
+  const top = d.y + Math.max(DOCK_PAD, (DOCK_H - stackH) / 2);
+  return {
+    x: d.x + (DOCK_W - BEAD_W) / 2,
+    y: top + slot * (BEAD_H + DOCK_ROW_GAP),
+  };
+}
+
 // --- Planner skill evolution (the capability strip) -----------------------
 
 /**
