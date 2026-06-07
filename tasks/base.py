@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD_TIMEOUT_S = 300
 
 
-@dataclass
+@dataclass(repr=False)
 class Task:
     """A problem the swarm builds and the evaluator grades. See module docstring."""
 
@@ -50,10 +50,18 @@ class Task:
     groups: list[str] = field(default_factory=list)
     # Deterministic source mutators (task-specific). reset_fn installs the
     # intentionally-incomplete baseline; apply_groups_fn renders/installs the source
-    # that genuinely satisfies a SET of covered groups (idempotent in that set).
+    # that genuinely satisfies a SET of covered groups (idempotent in that set);
+    # restore_fn (optional) returns the workspace to its complete green state (else
+    # apply_groups over all groups is used).
     reset_fn: Optional[Callable[[], None]] = None
     apply_groups_fn: Optional[Callable[[set[str]], None]] = None
+    restore_fn: Optional[Callable[[], None]] = None
     history_dir: Optional[Path] = None
+
+    def __repr__(self) -> str:
+        # Keep Weave op traces clean: a Task holds callables + an Evaluator, so the
+        # default dataclass repr is noisy. Trace inputs read as Task(<name>).
+        return f"Task({self.name})"
 
     # ----- workspace lifecycle -----
 
@@ -61,6 +69,20 @@ class Task:
         """Reset the workspace to its intentionally-incomplete baseline."""
         if self.reset_fn is not None:
             self.reset_fn()
+
+    def restore_workspace(self) -> None:
+        """Restore the workspace to its complete (green) state for repo hygiene.
+
+        A run leaves the workspace at whatever partial state it reached; this
+        rewrites the complete source so the repo is green at rest (cargo test and
+        the oracle pass). The genuine per-version results live in the leaderboard
+        and the history snapshots, so restoring the live file loses nothing. Called
+        in a finally after a top-level run and by /reset.
+        """
+        if self.restore_fn is not None:
+            self.restore_fn()
+        elif self.apply_groups_fn is not None and self.groups:
+            self.apply_groups_fn(set(self.groups))
 
     def apply_groups(self, groups) -> None:
         """Deterministically make the workspace genuinely satisfy ``groups``.

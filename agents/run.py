@@ -521,6 +521,10 @@ if __name__ == "__main__":
     g = sys.argv[1] if len(sys.argv) > 1 else task.goal
     base = sys.argv[2] if len(sys.argv) > 2 else "dev"
     n = int(sys.argv[3]) if len(sys.argv) > 3 else 8
-    out = improve_loop(task, g, base, n)
-    print(json.dumps(out, indent=2))
-    print("leaderboard:", bus.get_leaderboard())
+    try:
+        out = improve_loop(task, g, base, n)
+        print(json.dumps(out, indent=2))
+        print("leaderboard:", bus.get_leaderboard())
+    finally:
+        # Leave the workspace green at rest even if the loop raised.
+        task.restore_workspace()

@@ -1,5 +1,12 @@
 """Weave Evaluation + Redis leaderboard for a Glassbox planner version.
 
+DEPRECATED (off the live path): this standalone module still passes --caps to the
+tokenizer binary, which is now de-gated and rejects unknown args, so its per-example
+Weave traces would be empty. It is not imported by the swarm (the live grading path
+is harness/evaluator.py via the validator). It will be rewritten in Phase 4 to run a
+general, task-aware Weave Evaluation over the checkable evaluator. Do not run it
+against the current binary until then.
+
 What this does, end to end:
   1. Load .env and init Weave at whitely-white-elk-llc/glassbox (entity qualified;
      a bare "glassbox" fails with an entity error).

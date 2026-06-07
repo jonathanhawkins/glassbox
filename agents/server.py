@@ -40,7 +40,7 @@ from . import _paths
 _paths.ensure_repo_root()
 _paths.load_env()
 
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
@@ -198,11 +198,48 @@ class ResetRequest(BaseModel):
     # Reset the planner skill back to the intentionally-incomplete baseline (ascii
     # only) and clear the v2..vN history, so Reset is a genuine start-over.
     reset_skill: bool = True
+    task: str = "tokenizer"
+
+
+# Only one swarm op may run at a time: the workspace source (e.g.
+# tokenizer-rs/src/pretok.rs) and the build target are SHARED, so overlapping runs
+# would race on the source file and grade each other's binary. The lock is held for
+# the whole duration of a run; overlapping requests are rejected with 409.
+_RUN_LOCK = threading.Lock()
 
 
 def _start_thread(target, *args, name: str) -> None:
-    """Run a blocking swarm op in a daemon thread so the HTTP call returns now."""
-    threading.Thread(target=target, args=args, name=name, daemon=True).start()
+    """Run a blocking swarm op in a daemon thread so the HTTP call returns now.
+
+    Single-run guard: if a run is already in progress, raise 409 rather than start a
+    second one against the shared workspace. The lock releases when the op finishes.
+    """
+    if not _RUN_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="a swarm run is already in progress; wait for it to finish",
+        )
+
+    def _guarded() -> None:
+        try:
+            target(*args)
+        finally:
+            _RUN_LOCK.release()
+
+    threading.Thread(target=_guarded, name=name, daemon=True).start()
+
+
+def _restore_quietly(task) -> None:
+    """Restore the workspace to its green state after a run (best effort, no raise).
+
+    A run leaves the workspace source partial; this re-renders the complete source
+    so the repo is green at rest. Genuine results persist in the leaderboard and the
+    history snapshots, so this loses nothing.
+    """
+    try:
+        task.restore_workspace()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[run] restore_workspace failed: {exc}")
 
 
 def _run_cycle_bg(task_name: str, goal: str, run_id: str, planner_version: int) -> None:
@@ -210,36 +247,39 @@ def _run_cycle_bg(task_name: str, goal: str, run_id: str, planner_version: int) 
     from . import run as run_module
     from tasks import load_task
 
+    task = load_task(task_name)
     try:
-        run_module.run_cycle(
-            load_task(task_name), goal, run_id, planner_version=planner_version
-        )
+        run_module.run_cycle(task, goal, run_id, planner_version=planner_version)
     except Exception as exc:  # noqa: BLE001 - surface in logs, do not crash server
         print(f"[run] run_cycle({run_id}) failed: {exc}")
+    finally:
+        _restore_quietly(task)
 
 
 def _improve_loop_bg(task_name: str, goal: str, run_base: str, max_versions: int) -> None:
     from . import run as run_module
     from tasks import load_task
 
+    task = load_task(task_name)
     try:
-        run_module.improve_loop(
-            load_task(task_name), goal, run_base, max_versions=max_versions
-        )
+        run_module.improve_loop(task, goal, run_base, max_versions=max_versions)
     except Exception as exc:  # noqa: BLE001
         print(f"[run] improve_loop({run_base}) failed: {exc}")
+    finally:
+        _restore_quietly(task)
 
 
 def _live_bg(task_name: str, goal: str, run_id: str, injections: int) -> None:
     from . import run as run_module
     from tasks import load_task
 
+    task = load_task(task_name)
     try:
-        run_module.run_cycle_live(
-            load_task(task_name), goal, run_id, injections=injections
-        )
+        run_module.run_cycle_live(task, goal, run_id, injections=injections)
     except Exception as exc:  # noqa: BLE001
         print(f"[run] run_cycle_live({run_id}) failed: {exc}")
+    finally:
+        _restore_quietly(task)
 
 
 @app.get("/health")
@@ -360,6 +400,15 @@ def post_reset(req: ResetRequest = ResetRequest()) -> dict[str, Any]:
             skill_state = "baseline"
         except Exception as exc:  # noqa: BLE001
             print(f"[reset] skill reset skipped: {exc}")
+    # Restore the task workspace to its complete green state, in symmetry with the
+    # skill reset: a cold 'Launch run' then shows the finished artifact and the repo
+    # is green. (A 'Run climb' resets the workspace to baseline itself at the start.)
+    try:
+        from tasks import load_task
+
+        load_task(req.task).restore_workspace()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[reset] workspace restore skipped: {exc}")
     # Re-mirror the (now empty) bead graph and the reset skill immediately so the
     # board and the skill viewer reflect the reset without waiting for a poll tick.
     try:

@@ -1,15 +1,16 @@
-"""Validator: run the REAL oracle over the run's covered categories.
+"""Validator: grade a run by building and running the real artifact (no gating).
 
-The validator grades a run by shelling the Rust tokenizer over the fixture corpus
-(``harness.run_oracle``) gated on the set of categories the workers have covered
-in this run. Accuracy is the exact-match fraction the oracle reports (which, by
-construction of the category gating, equals the share of the corpus whose
-category is covered). It records that accuracy on the planner-version leaderboard
-and emits ``validation_passed`` (accuracy > 0) or ``validation_failed``, with a
-payload carrying the accuracy, the covered caps, and the failing categories.
+The validator realizes the categories the workers covered this run into the task
+workspace source (``task.apply_groups``), builds it (``task.build``), and grades
+the rebuilt artifact with the task's checkable evaluator (``task.evaluate``).
+Accuracy is the exact-match fraction the evaluator reports over the REAL binary, so
+it is a genuine consequence of the source, not a gate. It records that accuracy on
+the planner-version leaderboard and emits ``validation_passed`` (accuracy > 0) or
+``validation_failed``, with a payload carrying the accuracy, the covered caps, and
+the failing groups.
 
 Interface other pillars build on:
-    validate(run_id, planner_version, caps) -> dict
+    validate(task, run_id, planner_version, caps) -> dict
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ _paths.ensure_repo_root()
 import weave  # noqa: E402
 
 from . import bus, worker  # noqa: E402
-from .planner import CATEGORY_ORDER, STRUCTURAL  # noqa: E402
+from .planner import CATEGORY_ORDER  # noqa: E402
 from harness.evaluator import EvalResult  # noqa: E402
 
 # The scoring categories the oracle understands (structural tags do not score).
