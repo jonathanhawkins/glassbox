@@ -1,76 +1,68 @@
-# Capability taxonomy (the self-improvement lever)
+# Tokenizer task: group taxonomy (the self-improvement lever)
 
-This is the shared contract between the tokenizer (tokenizer-rs), the planner
-(agents/planner), and the validator (agents/validator + harness). All three MUST
-agree on these names and rules. The goal: an incomplete plan yields a tokenizer
-that genuinely fails a class of inputs, so the oracle (exact token-ID match)
-returns an intermediate accuracy, and the correctness curve climbs honestly as
-the improver adds the missing category beads.
+This is the shared contract for the **tokenizer task** between the tokenizer
+(tokenizer-rs), the planner (agents/planner), and the validator (agents/validator +
+harness). It is one task's group taxonomy: the kata task defines its own groups (its
+pytest modules). The goal: an incomplete tokenizer genuinely fails a class of inputs,
+so the oracle (exact token-ID match against tiktoken gpt2, on the real built binary)
+returns an intermediate accuracy, and the correctness curve climbs honestly as the
+swarm writes the missing pretokenizer feature and the improver adds the missing bead.
 
-## Categories (scoring capabilities)
+There is **no gating**. Earlier versions emitted a wrong-token sentinel for disabled
+categories; that is removed. The binary always runs the exact tiktoken algorithm over
+whatever its source (`tokenizer-rs/src/pretok.rs`) currently defines, so accuracy is a
+genuine consequence of the code the workers write.
 
-Each input line belongs to exactly ONE category, chosen by this priority order
-(first match wins). The tokenizer classifies every input line with these exact
-rules; the corpus is balanced so each category has a meaningful share.
+## Groups (the scoring capabilities)
+
+Each corpus line belongs to exactly ONE group, chosen by this priority order (first
+match wins). The classifier lives in the fixture generator; the corpus is balanced so
+each group has a meaningful share. The fixtures carry a `category` field used only to
+report a per-group (by_group) pass/fail breakdown, which steers the improver.
 
 1. `emoji`        line contains any Unicode codepoint >= 0x2600 (emoji, dingbats, symbols).
 2. `unicode`      line contains any non-ASCII codepoint (>= 0x80) and is not `emoji`.
-3. `code`         line contains any code marker: "def ", "fn ", "let ", "const ", "SELECT ", "git ", "();", "->", "::", "{", "}", "[", "]".
+3. `code`         line contains a code marker ("def ", "fn ", "let ", "const ", "SELECT ", "git ", "();", "->", "::", "{", "}", "[", "]").
 4. `numbers`      line contains an ASCII digit 0-9.
-5. `whitespace`   line has a leading space, a trailing space, a tab, or an internal double-space "  ".
-6. `punctuation`  line contains a contraction or quote or heavy punctuation: any of ' " ! ? ( ) ; : , . / [ ] { }.
+5. `whitespace`   line has a leading space, a trailing space, a tab, or an internal double-space.
+6. `punctuation`  line contains a contraction, quote, or heavy punctuation (' " ! ? ( ) ; : , . / [ ] { }).
 7. `ascii`        default. Plain ASCII letters and single spaces.
 
-Note: `ascii` is the foundational category (plain text). Build the corpus so a
-plain `ascii` line has no digits, no non-ASCII, no code markers, no leading or
-trailing or double spaces, and no punctuation, so it falls through to `ascii`.
+`ascii` is the foundational group (plain text), always present in the baseline.
 
-## Gating (tokenizer-rs)
+## How a group is covered (genuinely)
 
-The CLI takes `--caps <comma-list>` or env `GLASSBOX_CAPS`. The list contains the
-ENABLED categories (plus any structural names, which are ignored for scoring).
-For each input line: classify it; if its category is in the enabled set, emit the
-correct token IDs; if NOT, emit a single deterministic wrong token `[0]` so it
-fails exact match. If neither `--caps` nor env is set, or the value is `all`, ALL
-categories are enabled and output is byte-for-byte exact (100%).
+Correctness for the tokenizer lives in its pretokenizer regex (`pretok.rs`): tiktoken
+splits text with the gpt2 regex, then byte-pair-merges each piece. A partial regex
+carves the wrong pieces for some inputs and those lines fail the oracle's exact match.
+A worker covers a group by writing the regex branch / letter-class / byte handling
+that makes that class of input tokenize correctly (the model authors it; a vetted
+reference render is the fallback). Adding a group is a real code change, graded by the
+real binary. Note that some groups overlap in the regex (the symbol branch that fixes
+`punctuation` also helps `code` and `emoji`), so the per-group steps are uneven, which
+is honest.
 
-Structural names accepted but with no scoring effect: `merges`, `vocab`,
-`encode`, `decode`, `special`, `harness`. (Beads exist for these; they do not
-gate the curve.)
+## Beads -> group (planner)
 
-## Beads -> capability (planner)
-
-The planner decomposes "port the BPE tokenizer to Rust" into 8 beads. Each
-category bead delivers correctness for its class of inputs; one structural bead
-covers the pipeline and harness. Map (title -> capability):
-
-1. Core BPE and vocab load (plain ASCII text)        -> `ascii`   (foundational; others depend on it)
-2. Regex pre-tokenization for punctuation/contractions -> `punctuation`
-3. Numeric token handling                            -> `numbers`
-4. Source-code token handling                        -> `code`
-5. Byte-level UTF-8 for unicode text                 -> `unicode`
-6. Emoji and multibyte sequences                     -> `emoji`
-7. Whitespace and spacing fidelity                   -> `whitespace`
-8. Encode/decode pipeline and oracle diff harness    -> `harness` (structural, no scoring effect)
-
-Dependencies: bead 1 (`ascii`) is foundational; beads 2-7 each depend on bead 1;
-bead 8 depends on beads 1-7. So beads 2-7 are parallelizable once bead 1 is done.
+The planner decomposes the goal into the foundational `ascii` bead, one bead per
+covered group, and a structural `harness` join bead. Each group bead depends on
+`ascii`; `harness` depends on all of them (so the group beads are parallelizable once
+`ascii` is done). Titles come from the task's SkillConfig.
 
 ## Validator / curve
 
-A run's active caps = the set of category tags of the beads that were worked and
-closed in this run's plan. The validator calls the oracle:
-`run_oracle(caps=active_categories)`. Accuracy = fraction of corpus lines whose
-category is enabled (and whose tokens match, which they always do when enabled).
-The leaderboard ZADD stores score=accuracy, member=planner_version.
+The workers author the source; the validator BUILDS the crate and runs the oracle
+over the full corpus on the real binary (no caps). Accuracy = fraction of corpus lines
+whose token IDs match exactly. The per-group breakdown (`by_group`) tells the improver
+which group is the biggest gap. The leaderboard ZADDs score=accuracy,
+member=planner_version, under the per-task key `glassbox:planner_scores:tokenizer`.
 
-The improver reads the Weave eval failures, classifies the failing lines into
-their categories, and ensures the next planner version includes the missing
-category beads. More categories covered -> higher accuracy -> the curve climbs.
+The improver reads the real per-group failures and rewrites the planner skill to add
+the missing group's bead. More groups written -> higher accuracy -> the curve climbs.
 
 ## fixtures.jsonl
 
-Each fixture row is {"text": str, "ids": [int], "category": str} where category
-is the result of the classifier above. The corpus is balanced across the 7
-categories. The oracle still scores by exact token-ID match on the real binary;
-the category field is for analysis and balance, not for scoring shortcuts.
+Each row is `{"text": str, "ids": [int], "category": str}` where `category` is the
+classifier result above. The corpus is balanced across the 7 groups. The oracle scores
+by exact token-ID match on the real binary; the category field is for the by_group
+breakdown and corpus balance, never a scoring shortcut.

@@ -13,18 +13,13 @@ GLASSBOX_PACE_MS=600 pnpm backend           # swarm + AG-UI server :8100 (paced 
 pnpm web                                     # cockpit :3100
 ```
 
-Open `http://localhost:3100`. Reset to a clean board right before you go on:
+Open `http://localhost:3100`. Use the cockpit Reset button (it clears the per-task
+leaderboards and the board) right before you go on. Workers author with the model by
+default; for a fast, fully reliable live board set `GLASSBOX_WORKER_LLM=0` (the
+deterministic reference path) and show a captured genuine run for the authoring beat.
 
-```bash
-redis-cli del glassbox:events glassbox:planner_scores glassbox:beads
-for k in $(redis-cli keys 'glassbox:run:*'); do redis-cli del "$k"; done
-```
-
-For the cleanest visual, run the cockpit in production mode so Next's dev overlay
-does not show. The CopilotKit chat logs one non-fatal AG-UI warning ("Cannot send
-RUN_FINISHED while tool calls are still active") from an upstream 1.59.5 lifecycle
-quirk; it is harmless and the launch still fires (the on-board buttons are an
-independent fallback).
+For the cleanest visual, run the cockpit in production mode so Next's dev overlay does
+not show:
 
 ```bash
 pnpm --filter web build && pnpm --filter web start   # cockpit :3100, no dev overlay
@@ -35,53 +30,66 @@ Have the Weave project open in a tab: https://wandb.ai/whitely-white-elk-llc/gla
 ## Script
 
 **0:00 to 0:20 (one slide).** "Agent swarms are black boxes. Glassbox is the glass
-cockpit: watch a self-improving swarm build real code, graded live against ground
-truth." Stack in one breath: Agent Mail and Beads for coordination, Weave for
-grading and self-improvement, Redis for the live bus, CopilotKit and tldraw for
-the cockpit.
+cockpit: watch a self-improving swarm genuinely write code, graded live against a
+checkable oracle, and do it on more than one problem." Stack in one breath: Agent Mail
+and Beads for coordination, Weave for grading and self-improvement, Redis for the live
+bus, CopilotKit and tldraw for the cockpit.
 
-**0:20 to 1:30 (live board).** In the CopilotKit command bar type:
-"port the BPE tokenizer to Rust." The planner decomposes the goal, beads appear on
-the chain, the coordinator routes ready beads, worker lanes light up amber, a bead
-travels to a worker and on to the validator. Line: "this is Agent Mail plus Beads
-under the hood, but now you can see it." Then click "Run live (inject)": the
-planner spots a missing category, injects a bead live, and the accuracy jumps.
+**0:20 to 1:10 (live board, tokenizer).** Task = tokenizer. Type or click Launch. The
+planner decomposes the goal, beads appear on the chain, the coordinator routes ready
+beads, worker lanes light up amber, a bead travels to a worker and on to the
+validator. Line: "the workers are writing the actual Rust pretokenizer here, and the
+validator builds it and diffs the token IDs against tiktoken. No gating, no hardcoded
+number." Click "Run live (inject)": the planner spots a missing group, injects a bead
+live, and the accuracy jumps.
 
-**1:30 to 2:20 (the oracle and Weave).** The validator runs the diff: the
-correctness number is real, exact token-ID match versus tiktoken. Show the
-Weave-graded correctness curve climbing across planner versions (v1 0.14 to v7
-1.00). Line: "Weave is not just logging. With a hard oracle it tells us which
-sub-agent moved correctness, and which plan passed cleanly versus thrashed."
+**1:10 to 1:55 (generality, the kata).** Switch the task to "kata" and Launch. "Same
+swarm, zero code changed, a completely different problem: a Python library graded by
+pytest." The board animates the same way; the curve climbs as the workers write
+modules and pytest passes more tests (0.52 to 1.00). Line: "the target is a prop. The
+machine is the point, and it generalizes to anything with a checkable evaluator."
 
-**2:20 to 2:50 (the punchline).** The planner rewrote its own skill from the Weave
-evals, autonomously. Show the v1 versus v7 `SKILL.md` diff (the GET /skill view or
-`agents/planner/history/v1.md` vs `v7.md`): each revision names the failing input
-category and the prior accuracy, and adds a bead to cover it. The curve climbed
-0.14 to 1.00 on its own.
+**1:55 to 2:40 (Weave and self-improvement).** Open Weave: each run is a nested
+session, and you can see which sub-agent wrote which code and whether a plan passed
+cleanly or thrashed. Then show the planner skill diff (the GET /skill viewer, or
+`history/v1` vs the latest): each revision names the group that failed most in the real
+eval and adds a bead to cover it. The curve climbed from a low floor to 1.00 on its
+own, on both tasks. Line: "Weave is not just logging. With a hard oracle it tells us
+which sub-agent actually moved correctness."
 
-**2:50 to 3:00 (close).** "Orchestration you can see, graded against truth, that
-improves itself. Built this weekend, and it connects to a larger Godot-to-Rust
-port."
+**2:40 to 3:00 (close).** "Orchestration you can see, agents that genuinely write code,
+graded against truth, that improves itself and generalizes. Built this weekend, and it
+connects to a larger Godot-to-Rust port."
 
 ## Backup buttons (if the chat is flaky)
 
-The board has direct controls: "Launch run" (single full plan, 100%), "Run climb
-x5/x7" (the genuine self-improvement loop), and "Run live (inject)" (the
-spot-a-gap beat). Each maps to POST /api/run, /api/loop, /api/live.
+The board has direct controls per task: "Launch run" (single full plan), "Run climb"
+(the genuine self-improvement loop), and "Run live (inject)" (the spot-a-gap beat).
+Each maps to POST /api/run, /api/loop, /api/live with the selected task.
 
 ## Q and A prep
 
-- Gaming: pass@1 plus exact token-ID match, read-only fixtures, Weave traces watched
-  for tampering. The tokenizer genuinely fails uncovered input categories, so the
-  number is not masked.
+- Do the agents really write the code? Yes. The worker prompts W&B Inference with the
+  current source and the validator's real failing cases, writes the edit, builds it,
+  and keeps it only if the score genuinely improves; otherwise it falls back to a
+  vetted reference (logged). The score always comes from the real built artifact.
+- Gaming: exact token-ID match / real pytest, read-only fixtures and tests, Weave
+  traces watched for tampering. There is no gating: an incomplete tokenizer genuinely
+  fails inputs, so the number is never masked.
+- Generality: a task is `{goal, workspace, checkable evaluator}`. We ship two
+  (tokenizer via exact oracle, kata via pytest) and the same swarm runs both. The
+  honest limit is the evaluator: any task with tests or a reference to diff.
 - Reused versus built: fresh repo this weekend. Beads (`br`), Agent Mail, tldraw,
-  CopilotKit, recharts, and tiktoken are third-party dependencies; the planner loop,
-  oracle harness, cockpit, and self-improvement loop are new. Patina is referenced
-  context only, not reused.
+  CopilotKit, recharts, tiktoken, and pytest are third-party; the swarm, the Task +
+  Evaluator abstraction, both tasks, the cockpit, and the self-improvement loop are
+  new. Patina is referenced context only, not reused.
 
 ## Fallbacks
 
 - Live launch flaky: play a pre-recorded clean board run, or use the board buttons.
+- LLM-authoring slow or flaky on stage: set `GLASSBOX_WORKER_LLM=0` (deterministic
+  reference path, still a real build + real grade) and show a captured genuine run for
+  the authoring beat.
 - Rust build slow: pre-build (cargo build --release), demo against the warm binary.
 - Weave UI finicky: show the curve from the cockpit (it reads Redis) and the
-  `agents/planner/history/` SKILL snapshots.
+  per-task SKILL snapshots.
