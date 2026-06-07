@@ -235,6 +235,10 @@ def improve_loop(
     llm.init_weave()
     weave_url = _weave_url()
 
+    # Start a climb with a trim beads WAL so a long run's many bead writes cannot
+    # slow to a crawl on an inherited, bloated write-ahead log.
+    beads.checkpoint_wal()
+
     # Always start from the incomplete baseline so there is real room to climb,
     # regardless of what a previous session left on disk.
     skill.reset_to_baseline(task.skill)

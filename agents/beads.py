@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
+import time
 from typing import Any, Optional, Sequence
 
 from . import _paths
@@ -35,43 +37,100 @@ from . import _paths
 _paths.ensure_repo_root()
 
 BR = "br"
-_TIMEOUT = 60  # seconds; br is local SQLite, fast.
+# The beads DB (one SQLite file) is shared by the server's bead poller and a run,
+# and (if a CLI run and the server overlap) across processes, so br calls must not
+# fight over it: --lock-timeout makes a writer WAIT for the lock instead of erroring
+# or hanging unbounded, the in-process lock stops our own threads from spawning
+# concurrent br subprocesses, and we retry briefly on a lock/busy error.
+_TIMEOUT = 45             # per-attempt subprocess timeout (> the lock wait below)
+_LOCK_TIMEOUT_MS = 15000  # SQLite busy timeout passed to br (wait up to 15s)
+_RETRIES = 4
+_BR_LOCK = threading.Lock()
 
 
 class BeadsError(RuntimeError):
     """A `br` invocation failed (nonzero exit) or produced unparseable JSON."""
 
 
+def _is_contention(text: str) -> bool:
+    """Whether a br failure looks like transient DB lock contention (retry-worthy)."""
+    t = (text or "").lower()
+    return "lock" in t or "busy" in t or "database is locked" in t
+
+
 def _run(args: Sequence[str], *, parse_json: bool = True) -> Any:
     """Run `br <args>` from the repo root. Return parsed JSON or raw stdout.
 
-    Raises BeadsError on nonzero exit so callers never silently proceed on a
-    failed bead operation.
+    Serializes br within this process and survives a busy beads DB: passes
+    --lock-timeout so a writer waits for the SQLite lock, and retries with backoff
+    on a timeout or a lock/busy error. Raises BeadsError only after exhausting
+    retries (or on a non-contention failure), so callers never silently proceed.
     """
-    cmd = [BR, *args]
-    proc = subprocess.run(
-        cmd,
-        cwd=str(_paths.REPO_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=_TIMEOUT,
-    )
-    if proc.returncode != 0:
+    cmd = [BR, "--lock-timeout", str(_LOCK_TIMEOUT_MS), *args]
+    last = ""
+    for attempt in range(_RETRIES):
+        try:
+            # One br subprocess at a time per process: the poller thread and a run
+            # thread take turns rather than fighting over the single SQLite DB.
+            with _BR_LOCK:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=str(_paths.REPO_ROOT),
+                    capture_output=True,
+                    text=True,
+                    timeout=_TIMEOUT,
+                )
+        except subprocess.TimeoutExpired:
+            last = f"timed out after {_TIMEOUT}s"
+            time.sleep(0.3 * (attempt + 1))
+            continue
+        if proc.returncode == 0:
+            out = proc.stdout.strip()
+            if not parse_json:
+                return out
+            if not out:
+                return None
+            try:
+                return json.loads(out)
+            except json.JSONDecodeError as exc:
+                raise BeadsError(
+                    f"br {' '.join(args)} returned non-JSON output: {out[:200]!r}"
+                ) from exc
+        last = proc.stderr.strip() or proc.stdout.strip()
+        if _is_contention(last) and attempt < _RETRIES - 1:
+            time.sleep(0.3 * (attempt + 1))
+            continue
         raise BeadsError(
-            f"br {' '.join(args)} failed (exit {proc.returncode}): "
-            f"{proc.stderr.strip() or proc.stdout.strip()}"
+            f"br {' '.join(args)} failed (exit {proc.returncode}): {last}"
         )
-    out = proc.stdout.strip()
-    if not parse_json:
-        return out
-    if not out:
-        return None
+    raise BeadsError(f"br {' '.join(args)} failed after {_RETRIES} attempts: {last}")
+
+
+def checkpoint_wal() -> None:
+    """Best-effort: fold the SQLite WAL back into the beads DB so it cannot bloat.
+
+    A long run does hundreds of bead writes; if the WAL is never checkpointed it can
+    grow to hundreds of MB and make every subsequent write crawl (the failure mode
+    that hung a run). Call this at the start of a climb so a fresh, trim WAL is
+    inherited; normal autocheckpoint keeps it bounded during the run. Never raises.
+    """
+    import glob
+    import sqlite3
+
     try:
-        return json.loads(out)
-    except json.JSONDecodeError as exc:
-        raise BeadsError(
-            f"br {' '.join(args)} returned non-JSON output: {out[:200]!r}"
-        ) from exc
+        dbs = glob.glob(str(_paths.REPO_ROOT / ".beads" / "*.db"))
+    except Exception:  # noqa: BLE001
+        return
+    for db in dbs:
+        try:
+            with _BR_LOCK:
+                conn = sqlite3.connect(db, timeout=5)
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                finally:
+                    conn.close()
+        except Exception:  # noqa: BLE001 - best effort, never block a run
+            pass
 
 
 def _deps_arg(deps: Optional[Sequence[str]]) -> Optional[str]:
