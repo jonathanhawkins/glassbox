@@ -11,12 +11,15 @@ hardcoded numbers), Weave traces and scores everything, and the improver rewrite
 planner skill from the real eval failures so correctness climbs across versions.
 
 It is **general**: a task is `{goal, workspace, checkable evaluator}`, and the same
-swarm runs any of them. We demonstrate two very different ones:
+swarm runs any of them. We demonstrate three:
 
 - **Rust BPE tokenizer**, graded by an exact token-ID diff against tiktoken gpt2.
 - **Python `textkit` library**, graded by its **pytest** suite.
+- **Bring your own repo**: hand it any real repo plus a test command and it discovers
+  the failing test modules and fixes them with the LLM, with no fallback (the score is
+  whatever the swarm actually earned, the source repo never mutated).
 
-The same planner/coordinator/worker/validator/improver climbs both (tokenizer
+The same planner/coordinator/worker/validator/improver climbs all of them (tokenizer
 ~0.17 to 1.00, textkit 0.52 to 1.00), with zero swarm code changed between tasks.
 
 Built at WeaveHacks 4 (W&B SF). Weave project:
@@ -33,10 +36,12 @@ https://wandb.ai/whitely-white-elk-llc/glassbox/weave
   current source and the validator's real failing cases, writes the edit, builds it,
   and keeps it only if the score genuinely improves; otherwise it falls back to a
   vetted reference (logged honestly). The score flows from the real built artifact.
-- **It generalizes.** The swarm is task-agnostic; the evaluator is pluggable
-  (`harness/evaluator.py`). The tokenizer and the textkit are two configured tasks, and
-  the same loop improves both. Generality is bounded only by the evaluator: any task
-  with an executable test suite or a reference to diff.
+- **It generalizes, and proves it.** The swarm is task-agnostic; the evaluator is
+  pluggable (`harness/evaluator.py`). The tokenizer and the textkit are two configured
+  tasks, and `+ repo` in the cockpit points the same loop at any repo you hand it: it
+  discovers the failing tests and fixes them with the LLM and no safety net. Generality
+  is bounded only by the evaluator: any task with an executable test suite or a
+  reference to diff.
 - **Genuine self-improvement.** The improver reads which groups failed in the real
   eval and rewrites the planner skill to add the missing bead. The skill evolves on
   disk and the accuracy climbs as a real consequence (snapshots per version).
@@ -50,8 +55,8 @@ https://wandb.ai/whitely-white-elk-llc/glassbox/weave
 Goal (CopilotKit chat) -> Planner decomposes -> Beads graph (br)
   -> Coordinator routes ready beads -> Workers AUTHOR the code (W&B Inference,
        build + self-check, reference fallback)
-  -> Validator builds + runs the task's checkable evaluator -> score + Weave Evaluation
-  -> Improver reads the real eval gaps -> rewrites the planner skill -> v(n+1)
+  -> Validator builds + runs the task's checkable evaluator -> score + a real Weave Evaluation
+  -> Improver reads the eval gaps back FROM Weave -> rewrites the planner skill -> v(n+1)
   -> repeat (autonomous)
 
 All agents -> Redis Stream glassbox:events -> SSE -> tldraw board
@@ -87,10 +92,12 @@ GLASSBOX_PACE_MS=600 pnpm backend          # swarm + server :8100 (paced for the
 pnpm web                                   # cockpit :3100
 ```
 
-Open `http://localhost:3100`. Pick a task (tokenizer or textkit) in the command bar, then
+Open `http://localhost:3100`. Pick a task (tokenizer or textkit) in the command bar, or
+click `+ repo` to bring your own (a repo path or git URL plus a test command). Then
 Launch run (single full plan), Run climb (the genuine self-improvement loop), or Run
 live (the spot-a-gap inject beat). Workers author with the model by default; set
-`GLASSBOX_WORKER_LLM=0` for the fast, fully reliable deterministic path on a live board.
+`GLASSBOX_WORKER_LLM=0` for the fast, fully reliable deterministic path on a live board
+(curated tasks only; bring-your-own-repo always uses the model with no fallback).
 
 From the CLI: `uv run python -m agents.run "<goal>" <run-base> <versions> <task>`
 (e.g. `... "build textkit" textkit 6 textkit`).

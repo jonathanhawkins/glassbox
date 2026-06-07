@@ -1,6 +1,8 @@
 # Glassbox submission
 
-**Weave project:** https://wandb.ai/whitely-white-elk-llc/glassbox/weave
+- **Repo:** https://github.com/jonathanhawkins/glassbox
+- **Weave project:** https://wandb.ai/whitely-white-elk-llc/glassbox/weave
+- **Demo video:** TODO, add the under 2 minute video link before submitting.
 
 ## Summary (2 to 3 sentences)
 
@@ -8,8 +10,10 @@ Agent swarms are black boxes. Glassbox is the glass cockpit that lets you watch 
 self-improving swarm (planner, coordinator, worker agents, validator, improver)
 genuinely write code, graded live against a checkable oracle. The swarm is
 task-agnostic: a task is `{goal, workspace, checkable evaluator}`, and the same swarm
-runs any of them, demonstrated on a Rust BPE tokenizer (graded by an exact token-ID
-diff against tiktoken) and a Python library (graded by its pytest suite), with the
+runs any of them, shown on a Rust BPE tokenizer (graded by an exact token-ID diff
+against tiktoken), a Python library (graded by its pytest suite), and a
+bring-your-own-repo mode where you hand it any real repo plus a test command and it
+discovers what is failing and fixes it with the LLM (no safety net), with the
 improver rewriting the planner skill from the real eval failures so correctness
 climbs across versions.
 
@@ -44,6 +48,15 @@ or a reference to diff, and the same swarm improves it.
   a Rust BPE tokenizer that reproduces tiktoken gpt2 byte-for-byte (graded by an exact
   token-ID diff over a 217-line corpus) and a Python `textkit` library (graded by its
   pytest suite). The SAME planner/coordinator/worker/validator/improver runs both.
+- **Bring-your-own-repo (built this weekend):** a runtime task kind that turns the
+  generality claim into a live demo. From the cockpit you give it a repo (path or git
+  URL), a test command, and the files workers may edit. It clones the repo into a
+  disposable sandbox (your repo is never mutated), runs the suite once to DISCOVER the
+  failing test modules as the scoring groups, then the swarm fixes them with the LLM
+  and NO deterministic fallback (an edit is kept only if it genuinely raises the
+  pass-rate, else the bead bounces). Test files are read-only to workers (a content
+  tripwire enforces it), so the score is purely what the model earned against a real
+  suite it had never seen.
 - **The self-improvement loop (built this weekend):** the improver reads which groups
   failed in the real eval and rewrites the planner skill to add the missing bead, so
   the skill materially evolves on disk and the score climbs as a real consequence
@@ -66,10 +79,15 @@ this repo this weekend.
 - **W&B Weave (observability + eval + self-improvement backbone):** `weave.init` plus
   `@weave.op` on the planner, workers (including the code-authoring LLM calls),
   validator, improver, and the run loop, so each run renders as a nested session of
-  sub-agents. A Weave Evaluation scores each task against its checkable evaluator. The
-  per-task planner-version leaderboard is the climbing curve. The improver consumes
-  the Weave-graded per-group failures to rewrite its own skill. The W&B MCP server is
-  wired for inspecting runs, traces, and evals.
+  sub-agents. On the live path the validator logs a real `weave.Evaluation` for every
+  planner version (model = `planner_v{n}`, one scored row per evaluator group plus an
+  accuracy / pass@1 / efficiency summary), all under one per-task Evaluation so the
+  versions line up as comparable rows. That is the Weave-graded climbing curve, also
+  mirrored to a Redis sorted set so the cockpit can tail it. The improver then reads
+  that Evaluation summary back FROM Weave to pick its next skill rewrite, falling back
+  to the in-process per-group breakdown only if Weave is momentarily unavailable so
+  the loop never stalls. The W&B MCP server is wired for inspecting the same runs,
+  traces, and evals.
 - **Redis (live event bus + leaderboard):** every agent appends structured events to
   the Redis Stream `glassbox:events`; the cockpit tails it over SSE and animates the
   board. The leaderboard is a per-task Redis sorted set
@@ -86,15 +104,25 @@ this repo this weekend.
 Generality is bounded by the evaluator: Glassbox is genuinely general for any task
 expressible as "make this test suite or reference pass" (the exact ground truth the
 swarm is graded on). It does not claim to solve open-ended tasks with no checkable
-success signal. For reliability on a live board, workers can fall back to a vetted
-reference when the model's edit does not build or does not improve the score; this is
-logged honestly, and the score always comes from the real built artifact either way.
+success signal. There are two honesty regimes, and we are explicit about both. On the
+curated demo tasks (tokenizer, textkit) workers may fall back to a vetted reference
+when the model's edit does not build or does not improve the score, so the live board
+always climbs; this is logged honestly and the score always comes from the real built
+artifact. In bring-your-own-repo mode there is NO fallback by design: every point on
+that curve is a test the model actually made pass, with the source repo untouched and
+the test files read-only.
 
 ## Eligibility
 
 - Brand new repo, built entirely at the hackathon, committed every phase.
 - Every third-party dependency is listed above with how it was used.
 - Weave project link included above.
+
+## Team
+
+**White Elk Studios.** Jonathan Hawkins, jonathan@whiteelkstudios.com.
+X https://x.com/jonathanhawkins, LinkedIn https://www.linkedin.com/in/jonathanhawkins/,
+GitHub https://github.com/jonathanhawkins.
 
 ## Run it
 
@@ -107,4 +135,6 @@ pnpm web               # cockpit :3100  (open http://localhost:3100)
 ```
 
 Pick a task (tokenizer or textkit) in the cockpit, then Launch run / Run climb / Run
-live. Ports 3100 (web) and 8100 (backend) are deliberate (3000/8000 are reserved).
+live. Or click `+ repo` to bring your own: point it at a repo and a test command and
+watch it discover the failures and fix them. Ports 3100 (web) and 8100 (backend) are
+deliberate (3000/8000 are reserved).
