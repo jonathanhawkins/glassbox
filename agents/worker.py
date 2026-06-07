@@ -189,17 +189,19 @@ def _author_source(
     scoring = set(getattr(task, "groups", []) or [])
     covered = accumulated_capabilities(run_id) & scoring
     targets = getattr(task, "edit_targets", []) or []
+    group_targets = getattr(task, "group_targets", {}) or {}
+    # The file this bead's group edits: a per-group module if the task maps one,
+    # else the single shared editable file.
+    target = group_targets.get(capability) or (targets[0] if targets else None)
 
     # Structural / non-scoring beads (e.g. harness) do not change graded source.
-    if capability not in scoring or not targets:
+    if capability not in scoring or not target:
         return {"source_kind": "structural"}
 
     # Deterministic mode: render the covered set and let the validator grade it.
     if not _worker_llm_enabled():
         task.apply_groups(covered)
         return {"source_kind": "deterministic"}
-
-    target = targets[0]
     # Establish the pre-bead state and the real failing examples for this group.
     task.build()
     before = task.evaluate()

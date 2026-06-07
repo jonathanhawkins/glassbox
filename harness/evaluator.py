@@ -27,6 +27,11 @@ Interface other pillars build on:
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import tempfile
+import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Protocol, runtime_checkable
@@ -114,4 +119,108 @@ class OracleDiffEvaluator:
             failures=failures,
             by_group=dict(res.get("by_category", {})),
             error=str(res.get("error", "")),
+        )
+
+
+def _group_from_classname(classname: str) -> str:
+    """Map a pytest junit classname (e.g. 'tests.test_slug') to a group ('slug')."""
+    last = (classname or "").split(".")[-1]
+    return last[len("test_"):] if last.startswith("test_") else last
+
+
+class PytestEvaluator:
+    """Run a task's pytest suite and grade it by pass fraction, grouped by module.
+
+    Runs ``pytest`` in the workspace, writing a JUnit XML report (built into pytest,
+    no plugin), then parses per-test results. ``score`` = passed/total, ``by_group``
+    is keyed by the test module's group (test_slug.py -> slug), and ``failures``
+    carry the failing test name and message. Un-gameable where the tests are real.
+
+    The root venv has no pytest, so by default it runs ``uv run --with pytest`` to
+    pull an ephemeral (cached) pytest; set ``with_pytest=False`` if pytest is a
+    project dependency. pytest is run with cwd=workspace so the package imports.
+    """
+
+    def __init__(
+        self,
+        test_args: Optional[list[str]] = None,
+        with_pytest: bool = True,
+        timeout_s: int = 120,
+    ) -> None:
+        self.test_args = test_args or ["-q"]
+        self.with_pytest = with_pytest
+        self.timeout_s = timeout_s
+
+    def evaluate(self, workspace: Path, *, seed: Optional[int] = None) -> EvalResult:
+        xml_fd, xml_path = tempfile.mkstemp(suffix=".xml", prefix="glassbox-pytest-")
+        os.close(xml_fd)
+        cmd = ["uv", "run"]
+        if self.with_pytest:
+            cmd += ["--with", "pytest"]
+        cmd += ["python", "-m", "pytest", *self.test_args, f"--junitxml={xml_path}"]
+        t0 = time.perf_counter()
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(workspace),
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_s,
+            )
+        except subprocess.TimeoutExpired:
+            return EvalResult(0.0, 0, 0, error=f"pytest timed out after {self.timeout_s}s")
+        except OSError as exc:
+            return EvalResult(0.0, 0, 0, error=f"failed to run pytest: {exc}")
+        wall_ms = int((time.perf_counter() - t0) * 1000)
+
+        try:
+            tree = ET.parse(xml_path)
+        except (ET.ParseError, OSError) as exc:
+            stderr = (proc.stderr or "").strip().replace("\n", " ")[:200]
+            return EvalResult(
+                0.0, 0, 0, wall_ms=wall_ms,
+                error=f"no/invalid junit report ({exc}); pytest said: {stderr}",
+            )
+        finally:
+            try:
+                os.unlink(xml_path)
+            except OSError:
+                pass
+
+        by_group: dict[str, dict[str, int]] = {}
+        failures: list[dict[str, Any]] = []
+        passed = total = 0
+        for tc in tree.getroot().iter("testcase"):
+            total += 1
+            group = _group_from_classname(tc.get("classname", ""))
+            g = by_group.setdefault(group, {"total": 0, "passed": 0, "failed": 0})
+            g["total"] += 1
+            node = tc.find("failure")
+            if node is None:
+                node = tc.find("error")
+            if node is not None:
+                g["failed"] += 1
+                if len(failures) < 20:
+                    failures.append(
+                        {
+                            "group": group,
+                            "test": tc.get("name", ""),
+                            "message": (node.get("message", "") or "")[:200],
+                        }
+                    )
+            else:
+                g["passed"] += 1
+                passed += 1
+
+        score = passed / total if total else 0.0
+        error = "" if total else "pytest collected no tests"
+        return EvalResult(
+            score=score,
+            passed=passed,
+            total=total,
+            pass_at_1=score,
+            wall_ms=wall_ms,
+            failures=failures,
+            by_group=by_group,
+            error=error,
         )

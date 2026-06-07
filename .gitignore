@@ -37,8 +37,8 @@ wandb/
 .turbo/
 coverage/
 
-# task run artifacts (workspace source snapshots, regenerated each run)
-tasks/*/history/
+# task run artifacts (workspace + skill snapshots, regenerated each run)
+tasks/**/history/
 
 # local Claude Code state (plans, local settings)
 .claude/
