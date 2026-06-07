@@ -23,42 +23,42 @@ _paths.ensure_repo_root()
 import weave  # noqa: E402
 
 from . import bus, worker  # noqa: E402
-from .planner import CATEGORY_ORDER  # noqa: E402
 from harness.evaluator import EvalResult  # noqa: E402
-
-# The scoring categories the oracle understands (structural tags do not score).
-_SCORING_CATEGORIES = set(CATEGORY_ORDER)
 
 
 def _failed_categories(
-    caps: set[str], failed_examples: list[dict[str, Any]]
+    caps: set[str], failures: list[dict[str, Any]], scoring: set[str]
 ) -> list[str]:
-    """Derive which categories are still failing.
+    """Derive which groups are still failing.
 
-    First try to read a ``category`` field off the oracle's failed_examples; if
-    those are present, the failing categories are exactly the categories seen
-    among the failures. Otherwise fall back to the scoring categories NOT in the
-    covered set (which is what the gating guarantees fails).
+    First try the ``group`` (or legacy ``category``) field off the evaluator's
+    failures; if present, the failing groups are exactly those seen among the
+    failures. Otherwise fall back to the scoring groups NOT in the covered set.
     """
     seen: set[str] = set()
-    for ex in failed_examples or []:
-        cat = ex.get("category") if isinstance(ex, dict) else None
+    for ex in failures or []:
+        cat = (ex.get("group") or ex.get("category")) if isinstance(ex, dict) else None
         if isinstance(cat, str) and cat:
             seen.add(cat)
     if seen:
         return sorted(seen)
-    return sorted(_SCORING_CATEGORIES - set(caps))
+    return sorted(scoring - set(caps))
 
 
 def _failing_breakdown(
-    scoring_caps: list[str], by_category: dict[str, Any]
+    scoring_caps: list[str],
+    by_group: dict[str, Any],
+    scoring: set[str],
+    order: list[str],
 ) -> list[dict[str, Any]]:
-    """Per-category failures (biggest first) for the categories NOT yet covered.
+    """Per-group failures (biggest first) for the groups NOT yet covered.
 
-    Reads the oracle's by_category tally and returns, for each uncovered scoring
-    category with failures, {category, failed, total}, sorted by failed desc with
-    a canonical tiebreak. This is the data-driven signal the improver prioritizes
-    and the cockpit surfaces as "what the eval found".
+    Reads the evaluator's by_group tally and returns, for each uncovered scoring
+    group with failures, {category, failed, total}, sorted by failed desc with a
+    canonical tiebreak (the task's group order). This is the data-driven signal the
+    improver prioritizes and the cockpit surfaces as "what the eval found". The row
+    key stays ``category`` for back-compat with the improver and cockpit; it holds
+    the group value.
     """
     covered = set(scoring_caps)
     rows = [
@@ -67,17 +67,13 @@ def _failing_breakdown(
             "failed": int(v.get("failed", 0)),
             "total": int(v.get("total", 0)),
         }
-        for c, v in (by_category or {}).items()
-        if c in _SCORING_CATEGORIES
-        and c not in covered
-        and int(v.get("failed", 0)) > 0
+        for c, v in (by_group or {}).items()
+        if c in scoring and c not in covered and int(v.get("failed", 0)) > 0
     ]
     rows.sort(
         key=lambda f: (
             -f["failed"],
-            CATEGORY_ORDER.index(f["category"])
-            if f["category"] in CATEGORY_ORDER
-            else 99,
+            order.index(f["category"]) if f["category"] in order else 99,
         )
     )
     return rows
@@ -111,9 +107,11 @@ def validate(
         caps = worker.accumulated_capabilities(run_id)
     caps = set(caps)
 
-    # The scoring categories the workers have covered this run. Structural tags
-    # (harness) are dropped: they have no scoring effect.
-    scoring_caps = sorted(caps & _SCORING_CATEGORIES)
+    # The scoring groups for this task and the subset the workers have covered this
+    # run. Structural tags (e.g. harness) are not in task.groups, so they drop out.
+    scoring = set(task.groups)
+    order = list(task.groups)
+    scoring_caps = sorted(caps & scoring)
 
     # Genuine grading: the workers have already authored the workspace source for
     # this run (LLM with deterministic fallback), so the validator just builds and
@@ -137,9 +135,9 @@ def validate(
 
     # The real per-group failure breakdown (biggest gap first) is the signal the
     # improver prioritizes on and the cockpit surfaces as "what it found".
-    failing = _failing_breakdown(scoring_caps, result.by_group)
+    failing = _failing_breakdown(scoring_caps, result.by_group, scoring, order)
     failed_categories = [f["category"] for f in failing] or _failed_categories(
-        caps, result.failures
+        caps, result.failures, scoring
     )
 
     bus.emit_type(

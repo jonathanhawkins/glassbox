@@ -42,12 +42,18 @@ _paths.load_env()
 import weave  # noqa: E402
 
 from . import bus, llm, skill  # noqa: E402
-from .skill import CATEGORY_ORDER, SKILL_PATH  # noqa: E402
+from .skill import CATEGORY_ORDER, SkillConfig  # noqa: E402
 
 
-def current_skill() -> str:
-    """Return the current planner skill text."""
-    return skill.read_skill(SKILL_PATH)
+def _cfg(task: Any = None) -> SkillConfig:
+    """The skill config for a task (defaults to the tokenizer skill when unset)."""
+    cfg = getattr(task, "skill", None) if task is not None else None
+    return cfg or skill.TOKENIZER
+
+
+def current_skill(cfg: SkillConfig = skill.TOKENIZER) -> str:
+    """Return the current planner skill text for ``cfg``."""
+    return skill.read_skill(cfg.skill_path)
 
 
 def allowed_caps_for_version(version: int) -> list[str]:
@@ -173,6 +179,7 @@ def _llm_rationale(
 
 @weave.op()
 def improve(
+    task: Any,
     run_id: str,
     planner_version: int,
     accuracy: float,
@@ -198,29 +205,30 @@ def improve(
     skill_path}.
     """
     llm.init_weave()
+    cfg = _cfg(task)
     next_version = planner_version + 1
 
-    text = current_skill()
-    covered_before = skill.parse_coverage(text)
+    text = current_skill(cfg)
+    covered_before = skill.parse_coverage(text, cfg)
     failing = list(failing) if failing else []
     # Prefer the biggest real gap from the eval (data-driven, varies per run);
-    # fall back to the lowest-index missing category when no magnitudes are given.
+    # fall back to the lowest-index missing group when no magnitudes are given.
     if failing:
-        category = skill.next_gap_by_impact(covered_before, failing)
+        category = skill.next_gap_by_impact(covered_before, failing, cfg)
     else:
-        category = skill.next_missing_category(covered_before, failed_categories)
+        category = skill.next_missing_category(covered_before, failed_categories, cfg)
 
     if category is None:
         # Full coverage already: nothing to improve. Snapshot defensively so the
         # next version still has a history entry to read.
-        skill.snapshot(next_version, text)
+        skill.snapshot(next_version, text, cfg)
         return {
             "from_version": planner_version,
             "next_version": next_version,
             "added_category": None,
             "covered": covered_before,
             "gap_categories": [],
-            "skill_path": str(SKILL_PATH),
+            "skill_path": str(cfg.skill_path),
         }
 
     # How many lines of the chosen category the eval flagged (for the cockpit's
@@ -249,7 +257,7 @@ def improve(
 
     # Clean structural edit (deterministic, canonical coverage block) plus an
     # LLM-authored plain-prose rationale (sanitized), with a templated fallback.
-    grown = skill.add_category(text, category)
+    grown = skill.add_category(text, category, cfg)
     rationale = _llm_rationale(planner_version, category, accuracy, chosen_failed)
     rewrite_source = "llm"
     if rationale is None:
@@ -259,17 +267,17 @@ def improve(
 
     # Invariant: the coverage block must parse and must have grown by EXACTLY the
     # intended category. Assert hard (a corrupted rewrite must never ship).
-    covered_after = skill.parse_coverage(new_text)
+    covered_after = skill.parse_coverage(new_text, cfg)
     grew = set(covered_after) - set(covered_before)
     assert grew == {category}, (
         f"rewrite must add exactly {category!r}; coverage went "
         f"{covered_before} -> {covered_after} (source={rewrite_source})"
     )
 
-    skill.write_skill(new_text, SKILL_PATH)
-    snap_path = skill.snapshot(next_version, new_text)
+    skill.write_skill(new_text, cfg.skill_path)
+    snap_path = skill.snapshot(next_version, new_text, cfg)
 
-    gap = [c for c in CATEGORY_ORDER if c not in set(covered_after)]
+    gap = [c for c in cfg.order if c not in set(covered_after)]
     bus.emit_type(
         "planner_rewrite",
         run_id,
@@ -305,5 +313,5 @@ def improve(
         "added_category": category,
         "covered": covered_after,
         "gap_categories": gap,
-        "skill_path": str(SKILL_PATH),
+        "skill_path": str(cfg.skill_path),
     }

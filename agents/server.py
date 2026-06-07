@@ -390,13 +390,16 @@ def post_reset(req: ResetRequest = ResetRequest()) -> dict[str, Any]:
     skill_state = "unchanged"
     if req.reset_skill:
         try:
-            # Genuine planner-skill reset: revert SKILL.md to the incomplete
-            # baseline (ascii only) and drop the stale v2..vN snapshots, then
-            # snapshot the baseline as v1, so the strip and the skill viewer
-            # start over at v1 instead of showing the previous climb.
-            skill.reset_to_baseline()
-            skill.reset_history()
-            skill.snapshot(1)
+            # Genuine planner-skill reset: revert the task's skill to the incomplete
+            # baseline and drop the stale v2..vN snapshots, then snapshot the
+            # baseline as v1, so the strip and the skill viewer start over at v1
+            # instead of showing the previous climb.
+            from tasks import load_task
+
+            _skill_cfg = load_task(req.task).skill or skill.TOKENIZER
+            skill.reset_to_baseline(_skill_cfg)
+            skill.reset_history(_skill_cfg)
+            skill.snapshot(1, cfg=_skill_cfg)
             skill_state = "baseline"
         except Exception as exc:  # noqa: BLE001
             print(f"[reset] skill reset skipped: {exc}")

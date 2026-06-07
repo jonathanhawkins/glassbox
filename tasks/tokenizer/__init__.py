@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents.skill import TOKENIZER as TOKENIZER_SKILL
 from harness.evaluator import OracleDiffEvaluator
 
 from ..base import Task
@@ -120,6 +121,7 @@ def build_task() -> Task:
         ],
         build_cwd=ROOT,
         groups=GROUPS,
+        skill=TOKENIZER_SKILL,
         reset_fn=_reset,
         apply_groups_fn=_apply,
         history_dir=HISTORY_DIR,

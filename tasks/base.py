@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from agents.skill import SkillConfig
 from harness.evaluator import EvalResult, Evaluator
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +49,10 @@ class Task:
     # Known group order for stable cockpit/improver ordering (input categories for
     # the tokenizer, test modules for pytest). Optional.
     groups: list[str] = field(default_factory=list)
+    # The planner-skill config for this task (ordered groups, foundational and
+    # structural tags, bead titles, and skill/baseline/history paths). The
+    # planner/improver read it; defaults to the tokenizer skill when unset.
+    skill: Optional[SkillConfig] = None
     # Deterministic source mutators (task-specific). reset_fn installs the
     # intentionally-incomplete baseline; apply_groups_fn renders/installs the source
     # that genuinely satisfies a SET of covered groups (idempotent in that set);

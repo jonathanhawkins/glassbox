@@ -49,71 +49,76 @@ _paths.load_env()
 import weave  # noqa: E402
 
 from . import beads, bus, llm, skill  # noqa: E402
-from .skill import (  # noqa: E402
-    CATEGORY_ORDER,
-    FOUNDATIONAL,
-    SKILL_PATH,
-    STRUCTURAL,
-    canonical_title,
-)
-
-# All allowed capability tags the planner/worker/validator agree on.
-CAPABILITIES = set(CATEGORY_ORDER) | {STRUCTURAL}
+from .skill import SkillConfig, canonical_title  # noqa: E402
 
 
-def read_skill() -> str:
-    """Return the current planner skill text (the editable SKILL.md)."""
-    return skill.read_skill(SKILL_PATH)
+def _capabilities(cfg: SkillConfig) -> set[str]:
+    """All allowed capability tags for a task: its scoring groups plus structural."""
+    return cfg.valid() | {cfg.structural}
 
 
-def covered_categories() -> list[str]:
-    """The categories the SKILL coverage block currently covers (ordered).
+def _cfg(task: Any = None) -> SkillConfig:
+    """The skill config for a task (defaults to the tokenizer skill when unset)."""
+    cfg = getattr(task, "skill", None) if task is not None else None
+    return cfg or skill.TOKENIZER
 
-    Parsed deterministically from SKILL.md (never via the LLM). This is the set
-    the planner turns into category beads.
+
+def read_skill(cfg: SkillConfig = skill.TOKENIZER) -> str:
+    """Return the current planner skill text for ``cfg`` (the editable skill file)."""
+    return skill.read_skill(cfg.skill_path)
+
+
+def covered_categories(cfg: SkillConfig = skill.TOKENIZER) -> list[str]:
+    """The groups the coverage block currently covers (ordered).
+
+    Parsed deterministically from the skill file (never via the LLM). This is the
+    set the planner turns into beads.
     """
-    return skill.covered_categories(SKILL_PATH)
+    return skill.covered_categories(cfg)
 
 
 def _plan_from_coverage(
-    covered: list[str], allowed_caps: Optional[Iterable[str]] = None
+    covered: list[str],
+    cfg: SkillConfig,
+    allowed_caps: Optional[Iterable[str]] = None,
 ) -> list[dict[str, Any]]:
-    """Build the deterministic bead spec from the SKILL coverage set.
+    """Build the deterministic bead spec from the coverage set for ``cfg``.
 
-    The spec is exactly: the foundational ``ascii`` bead, one bead per covered
-    scoring category, and the structural ``harness`` join bead. Every category
-    bead depends on ``ascii``; ``harness`` depends on all the category beads.
-    Titles come from the canonical map so deps (wired by title) always line up.
+    The spec is exactly: the foundational bead, one bead per covered scoring group,
+    and the structural join bead. Every group bead depends on the foundational one;
+    the structural bead depends on all of them. Titles come from the config's
+    canonical map so deps (wired by title) always line up.
 
-    ``allowed_caps`` (when given) intersects the covered categories, but ``ascii``
-    and ``harness`` are always kept, so a caller can request a narrower plan
-    without breaking the foundational/join wiring.
+    ``allowed_caps`` (when given) intersects the covered groups, but the
+    foundational and structural beads are always kept, so a caller can request a
+    narrower plan without breaking the wiring.
     """
-    cats = [c for c in CATEGORY_ORDER if c in set(covered)]
+    foundational, structural = cfg.foundational, cfg.structural
+    cats = [c for c in cfg.order if c in set(covered)]
     if allowed_caps is not None:
-        allow = set(allowed_caps) | {FOUNDATIONAL, STRUCTURAL}
+        allow = set(allowed_caps) | {foundational, structural}
         cats = [c for c in cats if c in allow]
-    # ascii is foundational and always present.
-    if FOUNDATIONAL not in cats:
-        cats = [FOUNDATIONAL, *cats]
+    # The foundational group is always present.
+    if foundational not in cats:
+        cats = [foundational, *cats]
 
-    ascii_title = canonical_title(FOUNDATIONAL)
+    base_title = canonical_title(foundational, cfg)
     spec: list[dict[str, Any]] = [
-        {"title": ascii_title, "capability": FOUNDATIONAL, "deps": []}
+        {"title": base_title, "capability": foundational, "deps": []}
     ]
     middle_titles: list[str] = []
     for cat in cats:
-        if cat == FOUNDATIONAL:
+        if cat == foundational:
             continue
-        title = canonical_title(cat)
-        spec.append({"title": title, "capability": cat, "deps": [ascii_title]})
+        title = canonical_title(cat, cfg)
+        spec.append({"title": title, "capability": cat, "deps": [base_title]})
         middle_titles.append(title)
-    # The harness join depends on ascii plus every covered category bead.
+    # The structural join depends on the foundational bead plus every group bead.
     spec.append(
         {
-            "title": canonical_title(STRUCTURAL),
-            "capability": STRUCTURAL,
-            "deps": [ascii_title, *middle_titles],
+            "title": canonical_title(structural, cfg),
+            "capability": structural,
+            "deps": [base_title, *middle_titles],
         }
     )
     return spec
@@ -140,14 +145,17 @@ def _extract_json_array(text: str) -> Optional[list[Any]]:
     return parsed if isinstance(parsed, list) else None
 
 
-def _normalize_plan(raw: list[Any]) -> Optional[list[dict[str, Any]]]:
+def _normalize_plan(
+    raw: list[Any], cfg: SkillConfig
+) -> Optional[list[dict[str, Any]]]:
     """Validate and clean an LLM-proposed plan against the contract.
 
-    Each item needs a non-empty title and a capability in the allowed set; deps
-    must reference titles present in the plan. Returns None if the plan is too
+    Each item needs a non-empty title and a capability in the task's allowed set;
+    deps must reference titles present in the plan. Returns None if the plan is too
     malformed to trust (the caller then falls back to canonical titles built from
-    the SKILL coverage).
+    the coverage).
     """
+    capabilities = _capabilities(cfg)
     cleaned: list[dict[str, Any]] = []
     titles: set[str] = set()
     for item in raw:
@@ -155,7 +163,7 @@ def _normalize_plan(raw: list[Any]) -> Optional[list[dict[str, Any]]]:
             return None
         title = str(item.get("title", "")).strip()
         cap = str(item.get("capability", "")).strip()
-        if not title or cap not in CAPABILITIES:
+        if not title or cap not in capabilities:
             return None
         deps = item.get("deps") or []
         if not isinstance(deps, list):
@@ -198,7 +206,7 @@ def _topo_sort(plan: list[dict[str, Any]]) -> Optional[list[dict[str, Any]]]:
 
 
 def _plan_from_llm(
-    goal: str, required_caps: set[str]
+    goal: str, required_caps: set[str], cfg: SkillConfig
 ) -> Optional[list[dict[str, Any]]]:
     """Ask the LLM to phrase the beads for exactly ``required_caps``.
 
@@ -209,7 +217,7 @@ def _plan_from_llm(
     return None so the caller uses canonical titles. This keeps the curve a real
     consequence of the skill, never of LLM whim.
     """
-    skill_text = read_skill()
+    skill_text = read_skill(cfg)
     caps_line = ", ".join(sorted(required_caps))
     messages = [
         {
@@ -243,7 +251,7 @@ def _plan_from_llm(
     if raw is None:
         print("[planner] could not parse LLM plan, using canonical titles")
         return None
-    normalized = _normalize_plan(raw)
+    normalized = _normalize_plan(raw, cfg)
     if normalized is None:
         print("[planner] LLM plan failed validation, using canonical titles")
         return None
@@ -262,6 +270,7 @@ def _plan_from_llm(
 
 @weave.op()
 def plan(
+    task: Any,
     goal: str,
     run_id: str,
     planner_version: int = 1,
@@ -285,10 +294,11 @@ def plan(
     bead depends on. This is the structure the coordinator/worker consume.
     """
     llm.init_weave()
+    cfg = _cfg(task)
 
-    # SKILL coverage is the source of truth for which categories the plan covers.
-    covered = covered_categories()
-    base_spec = _plan_from_coverage(covered, allowed_caps=allowed_caps)
+    # The coverage block is the source of truth for which groups the plan covers.
+    covered = covered_categories(cfg)
+    base_spec = _plan_from_coverage(covered, cfg, allowed_caps=allowed_caps)
     required_caps = {b["capability"] for b in base_spec}
 
     # The LLM genuinely phrases and structures the decomposition for the required
@@ -305,7 +315,7 @@ def plan(
         "no",
         "",
     ):
-        llm_spec = _plan_from_llm(goal, required_caps)
+        llm_spec = _plan_from_llm(goal, required_caps, cfg)
         if llm_spec is not None:
             spec = llm_spec
             source = "llm"
@@ -387,8 +397,11 @@ def plan(
 if __name__ == "__main__":
     import sys
 
-    g = sys.argv[1] if len(sys.argv) > 1 else "port the BPE tokenizer to Rust"
+    from tasks import load_task
+
+    task = load_task(sys.argv[4] if len(sys.argv) > 4 else "tokenizer")
+    g = sys.argv[1] if len(sys.argv) > 1 else task.goal
     rid = sys.argv[2] if len(sys.argv) > 2 else "dev"
     ver = int(sys.argv[3]) if len(sys.argv) > 3 else 1
-    out = plan(g, rid, ver)
+    out = plan(task, g, rid, ver)
     print(json.dumps(out, indent=2))

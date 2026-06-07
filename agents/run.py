@@ -52,8 +52,6 @@ from . import (  # noqa: E402
     validator,
     worker,
 )
-from .skill import CATEGORY_ORDER, FOUNDATIONAL  # noqa: E402
-
 # Hard cap on coordinator/worker passes so a wedged graph can never spin forever.
 # The canonical graph drains in 3 waves (ascii -> middle categories -> harness);
 # this is a generous ceiling.
@@ -167,8 +165,8 @@ def run_cycle(
     )
     bus.set_agent_status(run_id, "coordinator", "working", planner_version=planner_version)
 
-    plan = planner.plan(goal, run_id, planner_version, allowed_caps=allowed_caps)
-    # Map bead id -> capability so the worker gets the right category to record.
+    plan = planner.plan(task, goal, run_id, planner_version, allowed_caps=allowed_caps)
+    # Map bead id -> capability so the worker gets the right group to author.
     cap_by_id = {b["id"]: b["capability"] for b in plan}
 
     worked = _drain_graph(task, run_id, planner_version, cap_by_id)
@@ -189,7 +187,7 @@ def run_cycle(
             "accuracy": accuracy,
             "caps": caps,
             "beads_worked": worked,
-            "covered": planner.covered_categories(),
+            "covered": planner.covered_categories(task.skill),
             "failed_categories": result.get("failed_categories", []),
         },
     )
@@ -199,7 +197,7 @@ def run_cycle(
         "accuracy": accuracy,
         "caps": caps,
         "beads": len(plan),
-        "covered": planner.covered_categories(),
+        "covered": planner.covered_categories(task.skill),
         "failing": result.get("failing", []),
         "failed_categories": result.get("failed_categories", []),
     }
@@ -239,8 +237,8 @@ def improve_loop(
 
     # Always start from the incomplete baseline so there is real room to climb,
     # regardless of what a previous session left on disk.
-    skill.reset_to_baseline()
-    skill.snapshot(1)
+    skill.reset_to_baseline(task.skill)
+    skill.snapshot(1, cfg=task.skill)
 
     base = run_base if run_base and run_base != "auto" else _auto_base("improve")
     cap = max(1, int(max_versions))
@@ -248,7 +246,7 @@ def improve_loop(
     summaries: list[dict[str, Any]] = []
     for n in range(1, cap + 1):
         run_id = f"{base}-v{n}"
-        covered_before = planner.covered_categories()
+        covered_before = planner.covered_categories(task.skill)
         # Clear any leftover beads (from a prior/interrupted run or the previous
         # version) so this version's drain works ONLY its own freshly-planned graph;
         # otherwise stale ready beads get worked in and inflate the score.
@@ -263,7 +261,7 @@ def improve_loop(
         accuracy = float(summary["accuracy"])
         failing = summary.get("failing", [])
         failed = [f["category"] for f in failing] or _failed_categories_for(
-            run_id, summary
+            task, run_id, summary
         )
         summaries.append(
             {
@@ -280,7 +278,7 @@ def improve_loop(
         # Genuine rewrite: grow the skill to cover the BIGGEST failing gap (from
         # the eval breakdown), which varies run to run.
         improver.improve(
-            run_id, n, accuracy, failed_categories=failed, failing=failing
+            task, run_id, n, accuracy, failed_categories=failed, failing=failing
         )
 
     return summaries
@@ -313,10 +311,10 @@ def run_cycle_live(
     """
     llm.init_weave()
 
-    full = planner.covered_categories()
-    # Drop the top 1-2 covered categories (after ascii) to manufacture a visible
-    # gap, but always plan ascii + harness + whatever remains.
-    droppable = [c for c in full if c != FOUNDATIONAL]
+    full = planner.covered_categories(task.skill)
+    # Drop the top 1-2 covered groups (after the foundational one) to manufacture a
+    # visible gap, but always plan foundational + structural + whatever remains.
+    droppable = [c for c in full if c != task.skill.foundational]
     k = max(1, min(int(injections), len(droppable)))
     to_inject = droppable[-k:]  # the highest-index covered cats become the gap
     start_caps = [c for c in full if c not in set(to_inject)]
@@ -334,7 +332,7 @@ def run_cycle_live(
     )
 
     plan = planner.plan(
-        goal, run_id, planner_version, allowed_caps=start_caps
+        task, goal, run_id, planner_version, allowed_caps=start_caps
     )
     cap_by_id = {b["id"]: b["capability"] for b in plan}
     _drain_graph(task, run_id, planner_version, cap_by_id)
@@ -365,7 +363,7 @@ def run_cycle_live(
         # the wiring is honest: it only becomes ready once ascii is closed).
         title = skill.canonical_title(category)
         ascii_id = next(
-            (b["id"] for b in plan if b["capability"] == FOUNDATIONAL), None
+            (b["id"] for b in plan if b["capability"] == task.skill.foundational), None
         )
         dep_ids = [ascii_id] if ascii_id else None
         bead_id = beads.create(
@@ -508,16 +506,18 @@ def _auto_base(prefix: str) -> str:
     return f"{prefix}-{int(time.time())}"
 
 
-def _failed_categories_for(run_id: str, summary: dict[str, Any]) -> list[str]:
-    """Derive the failing categories for a finished cycle.
+def _failed_categories_for(
+    task: Any, run_id: str, summary: dict[str, Any]
+) -> list[str]:
+    """Derive the failing groups for a finished cycle.
 
-    Uses the run's accumulated caps (from the summary) to compute the scoring
-    categories not yet covered. This is exactly what the validator reports, but
-    recomputed here so ``improve_loop`` does not need to thread the validator's
-    full result through ``run_cycle``.
+    Uses the run's accumulated caps (from the summary) to compute the task's scoring
+    groups not yet covered. This is what the validator reports, recomputed here so
+    ``improve_loop`` does not need to thread the validator's full result through
+    ``run_cycle``.
     """
     caps = set(summary.get("caps", []))
-    return [c for c in CATEGORY_ORDER if c not in caps]
+    return [c for c in task.groups if c not in caps]
 
 
 if __name__ == "__main__":
