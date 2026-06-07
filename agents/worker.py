@@ -126,8 +126,13 @@ def _llm_author(
     does not look like the target file. The model only ever sees the real source and
     the real failing examples; the build + oracle (not the model) decide if it worked.
     """
-    model = os.environ.get("GLASSBOX_CODER_MODEL") or os.environ.get(
-        "GLASSBOX_CHAT_MODEL", "meta-llama/Llama-3.3-70B-Instruct"
+    # Prefer an explicit coder/chat model; otherwise fall through to the project's
+    # model resolution (GLASSBOX_LLM_MODEL or a /models probe via llm.get_model()),
+    # so a retired hardcoded model never silently forces the deterministic path.
+    model = (
+        os.environ.get("GLASSBOX_CODER_MODEL")
+        or os.environ.get("GLASSBOX_CHAT_MODEL")
+        or None
     )
     retry = (
         f"\n\nYour previous attempt failed to build with:\n{build_error[:600]}\n"
@@ -163,7 +168,7 @@ def _llm_author(
         },
     ]
     try:
-        reply = llm.chat(messages, model=model, temperature=0.1, max_tokens=2048)
+        reply = llm.chat(messages, model=model, temperature=0.1, max_tokens=4096)
     except llm.LLMError as exc:
         print(f"[worker] LLM unavailable, using deterministic fallback: {exc}")
         return None

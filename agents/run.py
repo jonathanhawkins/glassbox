@@ -249,6 +249,10 @@ def improve_loop(
     for n in range(1, cap + 1):
         run_id = f"{base}-v{n}"
         covered_before = planner.covered_categories()
+        # Clear any leftover beads (from a prior/interrupted run or the previous
+        # version) so this version's drain works ONLY its own freshly-planned graph;
+        # otherwise stale ready beads get worked in and inflate the score.
+        beads.close_open(reason=f"cleared before {run_id}")
         # Each version builds its plan FRESH from the baseline source, so the genuine
         # per-bead authoring is coherent (no carry-over from the previous version's
         # source) and the version's score reflects exactly the skill's current

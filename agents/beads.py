@@ -169,6 +169,27 @@ def close(bead_id: str, reason: str = "") -> dict[str, Any]:
     return {"id": bead_id, "closed": True, "reason": reason or None}
 
 
+def close_open(reason: str = "") -> int:
+    """Close every not-yet-closed bead. Returns the count closed.
+
+    Used to clear the graph between runs (and between improve_loop versions) so a
+    drain works only its own freshly-planned beads, never stragglers from a prior
+    or interrupted run. Closes blocked beads too (which ``ready()`` would miss),
+    and is best effort: a single failed close never aborts the sweep.
+    """
+    closed = 0
+    for issue in list_all():
+        bid = issue.get("id")
+        status = str(issue.get("status", "")).strip().lower()
+        if bid and status != "closed":
+            try:
+                close(bid, reason=reason or "cleared")
+                closed += 1
+            except BeadsError:
+                pass
+    return closed
+
+
 def get(bead_id: str) -> dict[str, Any]:
     """Return a single issue's details via `br show <id> --json`.
 
