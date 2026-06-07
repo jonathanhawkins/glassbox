@@ -42,3 +42,7 @@ tasks/**/history/
 
 # local Claude Code state (plans, local settings)
 .claude/
+
+# BYO disposable sandboxes + synthesized skill state (generated at runtime)
+tasks/byo/_sandboxes/
+tasks/byo/_state/
