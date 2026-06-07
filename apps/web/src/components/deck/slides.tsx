@@ -670,9 +670,9 @@ export const SLIDES: Slide[] = [
               Redis
             </div>
             <p className="text-base leading-relaxed text-slate-300">
-              The event stream (<Mono>glassbox:events</Mono>), the leaderboard
-              sorted set (<Mono>glassbox:planner_scores</Mono>), and the bead-graph
-              mirror for board hydration.
+              The event stream (<Mono>glassbox:events</Mono>), the per-task
+              leaderboard sorted set (<Mono>{"glassbox:planner_scores:{task}"}</Mono>),
+              and the bead-graph mirror for board hydration.
             </p>
           </Panel>
           <Panel accent="emerald" className="flex flex-col gap-3 p-6">

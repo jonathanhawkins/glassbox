@@ -173,7 +173,7 @@ export function LaunchControls({
           disabled={busy !== null}
           className="flex-1 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-200 transition hover:bg-fuchsia-500/20 disabled:opacity-50"
         >
-          {busy === "loop" ? "Climbing..." : "Run climb x5"}
+          {busy === "loop" ? "Climbing..." : "Run climb"}
         </button>
       </div>
       <button

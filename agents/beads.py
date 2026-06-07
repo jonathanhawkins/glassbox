@@ -53,9 +53,13 @@ class BeadsError(RuntimeError):
 
 
 def _is_contention(text: str) -> bool:
-    """Whether a br failure looks like transient DB lock contention (retry-worthy)."""
+    """Whether a br failure looks like transient DB lock contention (retry-worthy).
+
+    Match the real SQLite/br lock vocabulary, not a bare "lock" substring (which
+    would also catch "block"/"deadlock"/"unlocked" and waste retries on fatal errors).
+    """
     t = (text or "").lower()
-    return "lock" in t or "busy" in t or "database is locked" in t
+    return "is locked" in t or "lock timeout" in t or "busy" in t
 
 
 def _run(args: Sequence[str], *, parse_json: bool = True) -> Any:

@@ -44,7 +44,7 @@ from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
-from contract.events import BEADS_STATE, SKILL_STATE  # noqa: E402
+from contract.events import BEADS_STATE  # noqa: E402
 
 from . import beads, bus, skill  # noqa: E402
 
@@ -140,12 +140,16 @@ def _snapshot_skill(cfg: Any = None) -> dict[str, Any]:
 
 
 def _poll_loop() -> None:
-    """Mirror the bead graph + planner skill to Redis every POLL_INTERVAL_S."""
+    """Mirror the bead graph to Redis every POLL_INTERVAL_S.
+
+    The planner skill is no longer mirrored here: the cockpit reads it per task on
+    demand via GET /skill?task=, so a single tokenizer-only mirror would be wrong
+    for the kata and has no reader.
+    """
     client = bus.get_client()
     while not _poll_stop.is_set():
         try:
             client.set(BEADS_STATE, json.dumps(_snapshot_beads()))
-            client.set(SKILL_STATE, json.dumps(_snapshot_skill()))
         except Exception as exc:  # noqa: BLE001 - never let the poller die loudly
             print(f"[poller] write skipped: {exc}")
         _poll_stop.wait(POLL_INTERVAL_S)
@@ -294,6 +298,19 @@ def health() -> dict[str, bool]:
     return {"ok": True}
 
 
+def _require_task(name: str):
+    """Load a task by name or raise 404, so an unknown ?task= never 500s."""
+    from tasks import available_tasks, load_task
+
+    try:
+        return load_task(name)
+    except (ValueError, KeyError):
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown task {name!r} (have: {sorted(available_tasks())})",
+        )
+
+
 @app.get("/leaderboard")
 def leaderboard(task: str = "tokenizer") -> list[dict[str, Any]]:
     """Return the task's planner-version leaderboard, ascending by accuracy."""
@@ -319,6 +336,7 @@ def get_beads() -> dict[str, Any]:
 @app.post("/run")
 def post_run(req: RunRequest) -> dict[str, str]:
     """Start one run_cycle in the background; return its run_id immediately."""
+    _require_task(req.task)
     run_id = f"run-{int(time.time() * 1000)}"
     _start_thread(
         _run_cycle_bg,
@@ -340,6 +358,7 @@ def post_loop(req: LoopRequest) -> dict[str, Any]:
     consequence of the skill evolving. The legacy ``versions`` field, if sent, is
     honored as ``max_versions`` for backward compatibility.
     """
+    _require_task(req.task)
     max_versions = req.versions if req.versions is not None else req.max_versions
     run_base = f"loop-{int(time.time() * 1000)}"
     _start_thread(
@@ -356,6 +375,7 @@ def post_loop(req: LoopRequest) -> dict[str, Any]:
 @app.post("/live")
 def post_live(req: LiveRequest) -> dict[str, Any]:
     """Start the live inject-the-gap beat in the background; return its run_id."""
+    _require_task(req.task)
     run_id = f"live-{int(time.time() * 1000)}"
     _start_thread(
         _live_bg, req.task, req.goal, run_id, req.injections, name=f"live-{run_id}"
@@ -370,9 +390,7 @@ def get_skill(task: str = "tokenizer") -> dict[str, Any]:
 
     Shape: {ts, current, covered, order, unit, versions: [{version, covered, text}]}.
     """
-    from tasks import load_task
-
-    cfg = load_task(task).skill or skill.TOKENIZER
+    cfg = _require_task(task).skill or skill.TOKENIZER
     return _snapshot_skill(cfg)
 
 
@@ -385,6 +403,7 @@ def post_reset(req: ResetRequest = ResetRequest()) -> dict[str, Any]:
     stragglers); and, by default, restores SKILL.md to full coverage so a cold
     'Launch run' shows the finished tokenizer while 'Run climb' rebuilds it.
     """
+    task_obj = _require_task(req.task)
     state = bus.reset_state()
     closed = 0
     try:
@@ -402,9 +421,7 @@ def post_reset(req: ResetRequest = ResetRequest()) -> dict[str, Any]:
             # baseline and drop the stale v2..vN snapshots, then snapshot the
             # baseline as v1, so the strip and the skill viewer start over at v1
             # instead of showing the previous climb.
-            from tasks import load_task
-
-            _skill_cfg = load_task(req.task).skill or skill.TOKENIZER
+            _skill_cfg = task_obj.skill or skill.TOKENIZER
             skill.reset_to_baseline(_skill_cfg)
             skill.reset_history(_skill_cfg)
             skill.snapshot(1, cfg=_skill_cfg)
@@ -415,17 +432,13 @@ def post_reset(req: ResetRequest = ResetRequest()) -> dict[str, Any]:
     # skill reset: a cold 'Launch run' then shows the finished artifact and the repo
     # is green. (A 'Run climb' resets the workspace to baseline itself at the start.)
     try:
-        from tasks import load_task
-
-        load_task(req.task).restore_workspace()
+        task_obj.restore_workspace()
     except Exception as exc:  # noqa: BLE001
         print(f"[reset] workspace restore skipped: {exc}")
-    # Re-mirror the (now empty) bead graph and the reset skill immediately so the
-    # board and the skill viewer reflect the reset without waiting for a poll tick.
+    # Re-mirror the (now empty) bead graph immediately so the board reflects the
+    # reset without waiting for a poll tick. (The skill is read per task on demand.)
     try:
-        client = bus.get_client()
-        client.set(BEADS_STATE, json.dumps(_snapshot_beads()))
-        client.set(SKILL_STATE, json.dumps(_snapshot_skill()))
+        bus.get_client().set(BEADS_STATE, json.dumps(_snapshot_beads()))
     except Exception:  # noqa: BLE001
         pass
     return {"ok": True, "redis": state, "beads_closed": closed, "skill": skill_state}

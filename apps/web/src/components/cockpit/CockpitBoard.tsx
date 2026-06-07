@@ -152,6 +152,9 @@ export default function CockpitBoard() {
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller) return;
+    // Reflect the active task's goal in the header immediately on switch (the SSE
+    // onGoal later overrides it once a run emits its goal).
+    setGoal(TASK_GOALS[activeTask]);
     let cancelled = false;
     void (async () => {
       let lastVersion = 1;

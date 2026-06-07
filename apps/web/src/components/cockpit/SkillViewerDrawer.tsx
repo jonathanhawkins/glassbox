@@ -259,8 +259,8 @@ export function SkillViewerDrawer({
 
         <div className="border-t border-slate-800/70 px-4 py-2 text-[10px] text-slate-500">
           {cur
-            ? `source: agents/planner/history/v${cur.version}.md · cached live in Redis (glassbox:skill)`
-            : "source: agents/planner/history · Redis glassbox:skill"}
+            ? `source: the task's planner skill, version ${cur.version} (read live via /api/skill)`
+            : "source: the task's planner skill (read live via /api/skill)"}
         </div>
       </aside>
     </>,
