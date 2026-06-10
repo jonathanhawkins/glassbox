@@ -203,8 +203,9 @@ export const swarmCache = {
     let changed = false;
     const nextState = { ...state };
     for (const [project, run] of Object.entries(state)) {
-      const roles = Object.fromEntries(Object.entries(run.roles).filter(([sid]) => liveSids.has(sid)));
-      if (Object.keys(roles).length !== Object.keys(run.roles).length) {
+      const cur = run.roles ?? {}; // old caches can predate the roles field
+      const roles = Object.fromEntries(Object.entries(cur).filter(([sid]) => liveSids.has(sid)));
+      if (Object.keys(roles).length !== Object.keys(cur).length) {
         nextState[project] = { ...run, roles };
         changed = true;
       }
@@ -216,8 +217,9 @@ export const swarmCache = {
         changed = true;
         continue;
       }
-      const nodes = Object.fromEntries(Object.entries(sw.nodes).filter(([, sid]) => liveSids.has(sid)));
-      if (Object.keys(nodes).length !== Object.keys(sw.nodes).length) {
+      const curNodes = sw.nodes ?? {};
+      const nodes = Object.fromEntries(Object.entries(curNodes).filter(([, sid]) => liveSids.has(sid)));
+      if (Object.keys(nodes).length !== Object.keys(curNodes).length) {
         nextRosters[cid] = { ...sw, nodes };
         changed = true;
       }
