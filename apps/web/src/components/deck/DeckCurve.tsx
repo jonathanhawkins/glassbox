@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { pollWhileVisible } from "@/lib/cockpit/pollWhileVisible";
+import { useIsPrint } from "./PrintContext";
 import {
   Area,
   AreaChart,
@@ -38,12 +39,19 @@ const FALLBACK: LeaderboardRow[] = [
 ];
 
 export function DeckCurve() {
+  // The hidden print-stack copy of this slide is mounted the whole time /deck is
+  // open. Rendered live it would poll /api/leaderboard every 1.5s from page load
+  // for a chart nobody can see (and a second time once the curve slide is on
+  // screen). In print we render the static v1..v7 fallback: no poll, no animation,
+  // which is also the correct frozen snapshot to bake into the exported PDF.
+  const isPrint = useIsPrint();
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
   // True once we have rows from the API; until then we render the fallback so
   // the slide is never blank, but we do not falsely claim the source is "live".
   const [live, setLive] = useState(false);
 
   useEffect(() => {
+    if (isPrint) return; // static snapshot for the print copy: never polls
     let alive = true;
     // Last payload we pushed to state. The poll runs every 1.5s, but on a stable
     // climb it returns identical rows; calling setRows with a fresh array each tick
@@ -75,7 +83,7 @@ export function DeckCurve() {
       alive = false;
       stop();
     };
-  }, []);
+  }, [isPrint]);
 
   const data = useMemo(() => {
     const source = rows.length > 0 ? rows : FALLBACK;
@@ -163,7 +171,7 @@ export function DeckCurve() {
               fill="url(#gb-deck-curve)"
               dot={{ r: 4, fill: "#ff6a1a", strokeWidth: 0 }}
               activeDot={{ r: 6, fill: "#ff8a3d" }}
-              isAnimationActive
+              isAnimationActive={!isPrint}
               animationDuration={650}
             />
           </AreaChart>

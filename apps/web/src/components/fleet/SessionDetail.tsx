@@ -79,12 +79,21 @@ export function SessionDetail() {
   const [modeIdx, setModeIdx] = useState(0);
   const mode = SEND_MODES[modeIdx];
 
+  // Clear the live transcript during render when the session id changes, rather than
+  // synchronously inside the stream effect. React's "adjust state on dependency change"
+  // pattern: behavior-identical (the stream repopulates) but without the extra cascading
+  // render an in-effect setState queues.
+  const [prevId, setPrevId] = useState(id);
+  if (prevId !== id) {
+    setPrevId(id);
+    if (id) setLiveLines([]);
+  }
+
   // Live terminal stream (best effort; falls back to the polled preview on any failure).
   useEffect(() => {
     if (!id) return;
     let cleanup: (() => void) | undefined;
     let cancelled = false;
-    setLiveLines([]);
     void openTerminalStream(id, (lines) => {
       // Streaming terminal text is non-urgent (same call the swarm console makes):
       // a transition keeps typing/scrolling responsive under a flood of 0.5s updates.

@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { PrintProvider } from "./PrintContext";
 import { SLIDES } from "./slides";
 
 // The deck shell renders whatever slide list it is given. The full pitch (`/deck`)
@@ -207,13 +208,15 @@ export function Deck({ only }: { only?: readonly string[] }) {
     {/* Print-only stack: every slide, one per landscape page. Hidden on screen
         (.gb-print is display:none), revealed by the @media print rules above when
         the user exports to PDF. */}
-    <div className="gb-print" aria-hidden>
-      {slides.map((s) => (
-        <div key={s.id} className="gb-print-page">
-          {s.render()}
-        </div>
-      ))}
-    </div>
+    <PrintProvider value={true}>
+      <div className="gb-print" aria-hidden>
+        {slides.map((s) => (
+          <div key={s.id} className="gb-print-page">
+            {s.render()}
+          </div>
+        ))}
+      </div>
+    </PrintProvider>
     </>
   );
 }

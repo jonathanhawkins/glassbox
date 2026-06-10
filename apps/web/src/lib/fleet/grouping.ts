@@ -33,18 +33,26 @@ function compareSessions(a: VoxSession, b: VoxSession): number {
 export function editDistance(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
-  );
+  if (m === 0) return n;
+  if (n === 0) return m;
+  // Two rolling rows instead of a full (m+1)x(n+1) matrix. groupByProject calls this
+  // O(n^2) times per session poll, so dropping the per-call allocation from O(m*n) to
+  // O(n) cuts real GC pressure on the hot path. Output is identical to the matrix form.
+  let prev: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  let curr: number[] = new Array<number>(n + 1);
   for (let i = 1; i <= m; i++) {
+    curr[0] = i;
     for (let j = 1; j <= n; j++) {
-      dp[i][j] =
+      curr[j] =
         a[i - 1] === b[j - 1]
-          ? dp[i - 1][j - 1]
-          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+          ? prev[j - 1]
+          : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
     }
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
   }
-  return dp[m][n];
+  return prev[n];
 }
 
 /** Group sessions by project, fuzzy-merging prefixes within edit distance 2. */
@@ -62,7 +70,15 @@ export function groupByProject(sessions: VoxSession[]): FleetGroup[] {
   };
   for (let i = 0; i < prefixes.length; i++) {
     for (let j = i + 1; j < prefixes.length; j++) {
-      if (editDistance(prefixes[i], prefixes[j]) <= 2) {
+      // Pure short-circuits that leave the resulting partition unchanged: pairs already
+      // in the same set need no work; identical prefixes merge trivially; and since edit
+      // distance is at least the length difference, prefixes whose lengths differ by more
+      // than 2 can never merge, so skip the O(L^2) DP for them (the dominant cost).
+      if (find(i) === find(j)) continue;
+      const pi = prefixes[i];
+      const pj = prefixes[j];
+      if (Math.abs(pi.length - pj.length) > 2) continue;
+      if (pi === pj || editDistance(pi, pj) <= 2) {
         parent[find(i)] = find(j);
       }
     }

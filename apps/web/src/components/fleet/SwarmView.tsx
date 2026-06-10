@@ -107,6 +107,48 @@ export function SwarmView() {
   const run = useSwarmRun(conductor?.project);
   const swarms = useSwarms();
 
+  // --- Render-phase view-state resets -------------------------------------------------
+  // Reset transient view state during render when the key it mirrors changes, rather than
+  // clearing it synchronously inside the matching effect. React's "adjust state on
+  // dependency change" pattern (the same one the cockpit curve uses): behavior-identical,
+  // but it avoids the extra cascading render an in-effect setState queues. The effects
+  // below now only open their stream / start their poll.
+  const conductorProject = conductor?.project ?? "";
+
+  // Deep-link: /swarm?session=<id> pre-selects the conductor once that session loads.
+  // Self-limiting (it clears its own precondition once it sets conductorId), so no
+  // prev-tracker is needed.
+  const wanted = searchParams?.get("session") ?? "";
+  if (wanted && !conductorId && sessions.some((s) => s.session_id === wanted)) {
+    setConductorId(wanted);
+  }
+
+  const [prevConductorId, setPrevConductorId] = useState(conductorId);
+  if (prevConductorId !== conductorId) {
+    setPrevConductorId(conductorId);
+    setLines([]); // conductor terminal restarts (or clears when deselected)
+  }
+
+  const pickedSid = pickedWorker ? nodeSessions[pickedWorker] : undefined;
+  const [prevPickedSid, setPrevPickedSid] = useState(pickedSid);
+  if (prevPickedSid !== pickedSid) {
+    setPrevPickedSid(pickedSid);
+    setWorkerLines([]); // picked node's own terminal restarts (or clears when none)
+  }
+
+  const [prevTasksProject, setPrevTasksProject] = useState(conductorProject);
+  if (prevTasksProject !== conductorProject) {
+    setPrevTasksProject(conductorProject);
+    if (!conductorProject) setTasks({}); // only clear when the project goes away (matches old reset)
+  }
+
+  const [prevLogsProject, setPrevLogsProject] = useState(conductorProject);
+  if (prevLogsProject !== conductorProject) {
+    setPrevLogsProject(conductorProject);
+    if (!conductorProject) setSwarmLogs({}); // only clear when the project goes away
+  }
+  // ------------------------------------------------------------------------------------
+
   const counts = useMemo(() => {
     const vals = Object.values(tasks);
     const st = (t: { status?: string }) => (t.status ?? "").toLowerCase();
@@ -144,26 +186,14 @@ export function SwarmView() {
     [nodeRing, pickedWorker],
   );
 
-  // Deep-link: /swarm?session=<id> pre-selects the conductor once sessions load.
-  const wanted = searchParams?.get("session") ?? "";
-  useEffect(() => {
-    if (wanted && !conductorId && sessions.some((s) => s.session_id === wanted)) {
-      setConductorId(wanted);
-    }
-  }, [wanted, sessions, conductorId]);
-
   // Stop any running loop when leaving the swarm view.
   useEffect(() => () => loopRef.current?.stop(), []);
 
   // Stream the conductor's terminal into the console.
   useEffect(() => {
-    if (!conductorId) {
-      setLines([]);
-      return;
-    }
+    if (!conductorId) return; // lines are cleared during render when conductorId changes
     let cancelled = false;
     let cleanup: (() => void) | undefined;
-    setLines([]);
     void openTerminalStream(conductorId, (ls) => {
       // Streaming log text is non-urgent: a transition keeps the console responsive
       // (typing, clicking) while a burst of terminal output floods in.
@@ -192,10 +222,7 @@ export function SwarmView() {
 
   // Poll the conductor's task list so a bead click can show what that work actually is.
   useEffect(() => {
-    if (!conductor?.project) {
-      setTasks({});
-      return;
-    }
+    if (!conductor?.project) return; // tasks cleared during render when the project goes away
     const project = conductor.project;
     let alive = true;
     const tick = async () => {
@@ -294,15 +321,10 @@ export function SwarmView() {
 
   // Stream the picked node's OWN session terminal, if it is a real spawned session (Phase B).
   useEffect(() => {
-    const sid = pickedWorker ? nodeSessions[pickedWorker] : undefined;
-    if (!sid) {
-      setWorkerLines([]);
-      return;
-    }
+    if (!pickedSid) return; // workerLines cleared during render when pickedSid changes
     let cancelled = false;
     let cleanup: (() => void) | undefined;
-    setWorkerLines([]);
-    void openTerminalStream(sid, (ls) => {
+    void openTerminalStream(pickedSid, (ls) => {
       // Non-urgent streaming text (see the conductor stream above): transition it so
       // the worker inspector stays interactive under a flood of output.
       if (!cancelled) startTransition(() => setWorkerLines(ls));
@@ -314,7 +336,10 @@ export function SwarmView() {
       cancelled = true;
       cleanup?.();
     };
-  }, [pickedWorker, nodeSessions]);
+    // Key on the resolved session id, not [pickedWorker, nodeSessions]: with nodeSessions
+    // now change-gated, the stream only reopens when the picked node's actual session id
+    // changes (not on every poll that returns an equal map).
+  }, [pickedSid]);
 
   useEffect(() => {
     const el = workerTermRef.current;
@@ -412,17 +437,25 @@ export function SwarmView() {
     for (const [sid, node] of Object.entries(roles)) {
       if (sessions.some((s) => s.session_id === sid)) inv[node] = sid;
     }
-    if (Object.keys(inv).length) setNodeSessions((prev) => ({ ...inv, ...prev }));
+    if (Object.keys(inv).length) {
+      // Add only role mappings we are not already tracking, and bail (return the same
+      // ref) when there is nothing new. The old `{ ...inv, ...prev }` built a fresh object
+      // on every sessions poll even when the map was unchanged, cascading into every
+      // effect keyed on nodeSessions. Existing live mappings still win.
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- gated external sync: returns prev (no re-render) when unchanged
+      setNodeSessions((prev) => {
+        const additions = Object.entries(inv).filter(([node]) => !(node in prev));
+        if (!additions.length) return prev;
+        return { ...prev, ...Object.fromEntries(additions) };
+      });
+    }
   }, [run.roles, sessions]);
 
   // Poll the durable swarm logs for this project from Redis (server-side, shared across tabs,
   // survives teardown + reload). This is the source of truth; localStorage is just a cache.
   // Polling (not one-shot) so a result the conductor records mid-run shows up live, no reload.
   useEffect(() => {
-    if (!conductor?.project) {
-      setSwarmLogs({});
-      return;
-    }
+    if (!conductor?.project) return; // swarmLogs cleared during render when the project goes away
     const project = conductor.project;
     let alive = true;
     const tick = () =>
@@ -474,6 +507,11 @@ export function SwarmView() {
       });
     }
     if (!pending.length) return;
+    // Legitimate external sync that also has a side effect (POSTs the snapshot to Redis
+    // below), gated above by snapRef + the pending-length check so it only fires on a real
+    // change. This is what the rule says effects are for, not the "you might not need an
+    // effect" case it targets.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- gated external sync + Redis POST side effect
     setSwarmLogs((prev) => {
       const next = { ...prev };
       for (const s of pending) next[s.node] = s;
