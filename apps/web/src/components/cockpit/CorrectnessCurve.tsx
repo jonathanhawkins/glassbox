@@ -1,61 +1,33 @@
 "use client";
 
-// The money shot: the correctness curve. Polls GET /api/leaderboard?task= every
-// 1.5s and plots accuracy (0..1) against planner version, climbing left to right
-// as the improver closes capability gaps. recharts AreaChart with a neon stroke.
-// The active task is threaded in so the curve reflects whichever target the
-// operator is running (the tokenizer and the textkit keep separate per-task curves).
+// The money shot: the correctness curve. Reads from the shared useLeaderboard
+// store (one poll per task shared across all consumers) and plots accuracy (0..1)
+// against planner version, climbing left to right as the improver closes capability
+// gaps. recharts AreaChart with a neon stroke. The active task is threaded in so
+// the curve reflects whichever target the operator is running.
 
-import { useEffect, useMemo, useState } from "react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import dynamic from "next/dynamic";
+import { useMemo, useState } from "react";
 
 import type { TaskName } from "@/lib/cockpit/tasks";
+import { useLeaderboard } from "@/lib/cockpit/useLeaderboard";
 import { CollapseButton } from "./CollapseButton";
 
-type LeaderboardRow = { version: number; accuracy: number };
+// Lazy boundary: recharts (~130KB gzipped) lives only in this child, so it loads
+// on demand instead of riding in the always-mounted cockpit chunk. ssr:false keeps
+// it client-only; the curve has its own empty/waiting states so no loader is needed.
+const Chart = dynamic(() => import("./CorrectnessCurveChart"), {
+  ssr: false,
+  loading: () => null,
+});
 
 export function CorrectnessCurve({ activeTask }: { activeTask: TaskName }) {
-  const [rows, setRows] = useState<LeaderboardRow[]>([]);
+  // Share the module-level leaderboard store with LeaderboardPanel (both are
+  // mounted in the right rail): one poll per task instead of two concurrent polls
+  // hitting /api/leaderboard at the same 1.5s cadence. The store's snapshot
+  // comparison already suppresses re-renders when rows are unchanged.
+  const { rows } = useLeaderboard(true, activeTask);
   const [open, setOpen] = useState(true);
-  // Reset the rows during render when the task switches, so the previous task's
-  // curve never lingers while the first poll for the new task is in flight. This
-  // render-phase reset (the React-recommended "adjust state on prop change"
-  // pattern) avoids a clearing setState inside the effect body.
-  const [rowsTask, setRowsTask] = useState<TaskName>(activeTask);
-  if (rowsTask !== activeTask) {
-    setRowsTask(activeTask);
-    setRows([]);
-  }
-
-  useEffect(() => {
-    let alive = true;
-    const poll = async () => {
-      try {
-        const res = await fetch(
-          `/api/leaderboard?task=${encodeURIComponent(activeTask)}`,
-          { cache: "no-store" },
-        );
-        const data = (await res.json()) as LeaderboardRow[];
-        if (alive && Array.isArray(data)) setRows(data);
-      } catch {
-        // keep last good value
-      }
-    };
-    poll();
-    const t = setInterval(poll, 1500);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, [activeTask]);
 
   const data = useMemo(
     () =>
@@ -73,75 +45,28 @@ export function CorrectnessCurve({ activeTask }: { activeTask: TaskName }) {
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <CollapseButton open={open} onClick={() => setOpen((o) => !o)} label="curve" />
-          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-mid">
             correctness curve
           </span>
         </div>
         <span className="flex items-baseline gap-2 tabular-nums">
           {latest !== null && (
-            <span className="text-[11px] font-medium text-cyan-300">
+            <span className="text-[11px] font-medium text-accent">
               {(latest * 100).toFixed(1)}%
             </span>
           )}
-          <span className="text-[10px] text-slate-500">
+          <span className="text-[10px] text-ink-dim">
             {data.length ? `v1 to v${data[data.length - 1].version}` : "no runs yet"}
           </span>
         </span>
       </div>
       <div className={`-mb-1 mt-1 h-[150px] ${open ? "" : "hidden"}`}>
         {data.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-xs text-slate-600">
+          <div className="flex h-full items-center justify-center text-xs text-ink-dim">
             waiting for the first graded run
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 6, right: 4, bottom: 0, left: -18 }}>
-              <defs>
-                <linearGradient id="gb-curve" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.55} />
-                  <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} />
-              <XAxis
-                dataKey="version"
-                tick={{ fill: "#64748b", fontSize: 10 }}
-                tickLine={false}
-                axisLine={{ stroke: "rgba(148,163,184,0.2)" }}
-                tickFormatter={(v) => `v${v}`}
-              />
-              <YAxis
-                domain={[0, 1]}
-                ticks={[0, 0.25, 0.5, 0.75, 1]}
-                tick={{ fill: "#64748b", fontSize: 10 }}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(v: number) => `${Math.round(v * 100)}`}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: "rgba(2,6,23,0.94)",
-                  border: "1px solid rgba(34,211,238,0.4)",
-                  borderRadius: 10,
-                  fontSize: 12,
-                  color: "#e2e8f0",
-                }}
-                labelFormatter={(v) => `planner v${v}`}
-                formatter={(v) => [`${(Number(v) * 100).toFixed(1)}%`, "accuracy"]}
-              />
-              <Area
-                type="monotone"
-                dataKey="accuracy"
-                stroke="#22d3ee"
-                strokeWidth={2.5}
-                fill="url(#gb-curve)"
-                dot={{ r: 2.5, fill: "#22d3ee", strokeWidth: 0 }}
-                activeDot={{ r: 4, fill: "#67e8f9" }}
-                isAnimationActive
-                animationDuration={500}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+          <Chart data={data} />
         )}
       </div>
     </div>

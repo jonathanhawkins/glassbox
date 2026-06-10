@@ -1,10 +1,13 @@
 """Coordinator: route currently-ready beads to workers round-robin.
 
-Reads ``beads.ready()`` (open AND unblocked beads only) and claims each one,
-assigning it to a worker from the pool (worker-1..worker-N) in round robin. For
-each claim it emits a ``bead_claimed`` event and flips that worker's agent_status
-to ``working``. It only ever claims ids returned by ``beads.ready()``, so it
-never tries to claim a still-blocked bead (which `br` would refuse).
+Reads ``beads.ready()`` (open AND unblocked beads only) and claims up to one bead
+per worker this wave, assigning each to a worker from the pool (worker-1..worker-N)
+in round robin. For each claim it emits a ``bead_claimed`` event and flips that
+worker's agent_status to ``working``. It only ever claims ids returned by
+``beads.ready()``, so it never tries to claim a still-blocked bead (which `br`
+would refuse). Capping a wave at one bead per worker is what keeps a worker from
+ever holding two tasks at once: any ready beads beyond the pool size wait and are
+claimed in the next wave, once a worker frees up by closing its current bead.
 
 The run loop (calling assign_ready repeatedly until the graph drains, with the
 worker closing each bead in between) lives in agents/run.py.
@@ -54,17 +57,28 @@ def assign_ready(
     planner_version: int = 1,
     workers: Optional[list[str]] = None,
 ) -> list[dict[str, Any]]:
-    """Claim every currently-ready bead and hand it to a worker (round robin).
+    """Claim up to one ready bead per worker and hand each to a worker (round robin).
 
-    One pass over ``beads.ready()``. For each ready bead: claim it for the next
-    worker in the pool, emit ``bead_claimed``, and set that worker's status to
-    ``working``. Returns the list of {bead_id, title, capability, assignee}
-    assignments made this pass (empty when nothing is ready).
+    One pass over ``beads.ready()``, capped at one bead per worker in the pool, so
+    no worker is ever handed two tasks in the same wave. For each claimed bead:
+    claim it for the next worker in the pool, emit ``bead_claimed``, and set that
+    worker's status to ``working``. Any ready beads beyond the pool size are left
+    for the next wave (claimed once a worker frees up by closing its current bead).
+    Returns the list of {bead_id, title, capability, assignee} assignments made
+    this pass (empty when nothing is ready).
     """
     global _next_worker
     pool = workers or DEFAULT_WORKERS
     assignments: list[dict[str, Any]] = []
+    claimed_workers: set[str] = set()
     for bead in beads.ready():
+        # One task per worker at a time: once every worker in the pool holds a bead
+        # this wave, stop. The still-ready beads are claimed in the NEXT wave, after
+        # a worker frees up by closing its current bead. This keeps the wave parallel
+        # (all free workers light up together) without ever stacking two beads on one
+        # worker.
+        if len(claimed_workers) >= len(pool):
+            break
         bead_id = bead.get("id")
         if not bead_id:
             continue
@@ -72,6 +86,7 @@ def assign_ready(
         # waves), so work spreads to whoever is free, not always worker-1.
         assignee = pool[_next_worker % len(pool)]
         _next_worker += 1
+        claimed_workers.add(assignee)
         capability = _capability_of(bead)
         beads.claim(bead_id, assignee=assignee)
         bus.emit_type(

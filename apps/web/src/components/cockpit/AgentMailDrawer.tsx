@@ -11,7 +11,7 @@
 // leases held). Messages are grouped by planner version and accumulate (never
 // disappear), so v1->v7 reads as a growing thread climbing with the curve.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   CAP_COLORS,
@@ -21,19 +21,15 @@ import {
   type MailMessage,
 } from "@/lib/cockpit/types";
 
-// Left-accent per message kind, so a glance reads the shape of the exchange:
-// dispatch/assign/done in the work palette, grade/rewrite in the verdict palette,
-// lease in the file-ownership palette.
-const KIND_ACCENT: Record<string, string> = {
-  dispatch: "#38bdf8", // sky
-  assign: "#fbbf24", // amber
-  done: "#34d399", // emerald
-  "grade-pass": "#22c55e", // green
-  "grade-fail": "#fb7185", // rose
-  rewrite: "#a78bfa", // violet
-  lease: "#2dd4bf", // teal (advisory file lease)
-  note: "#475569", // slate
-};
+// A 1–2 char monogram for the sender avatar (Gmail-style round badge): workers
+// keep their lane number (W1..W4); the single-instance agents use their first
+// initial (P, C, V, I, S). The avatar fill is the sender's lane color — see
+// agentColor — so identity reads from the left edge of every row.
+function agentInitials(agent: string): string {
+  const w = /^worker-(\d+)$/.exec(agent);
+  if (w) return `W${w[1]}`;
+  return (agent.trim()[0] ?? "?").toUpperCase();
+}
 
 function fmtTime(ts: number): string {
   if (!ts) return "";
@@ -69,16 +65,16 @@ function fmtExpires(iso?: string | null): string | null {
   return `${clock} (expired)`;
 }
 
-// The provenance dot: emerald = sent over Agent Mail with a verified sender, teal
-// = sent over Agent Mail, slate = Redis mirror only (server was offline). Absent
+// The provenance dot: pass = sent over Agent Mail with a verified sender, accent
+// = sent over Agent Mail, ink-dim = Redis mirror only (server was offline). Absent
 // for legacy rows that predate the field.
 function liveDot(m: MailMessage): { color: string; label: string } | null {
   if (m.real === undefined) return null;
   if (!m.real)
-    return { color: "#64748b", label: "Redis mirror (Agent Mail offline)" };
+    return { color: "#6e6e73", label: "Redis mirror (Agent Mail offline)" };
   if (m.verified)
-    return { color: "#34d399", label: "sent over Agent Mail (verified sender)" };
-  return { color: "#22d3ee", label: "sent over Agent Mail" };
+    return { color: "#5ba372", label: "sent over Agent Mail (verified sender)" };
+  return { color: "#ff6a1a", label: "sent over Agent Mail" };
 }
 
 function leasePathName(lease: MailLease): string {
@@ -96,10 +92,10 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-start gap-2">
-      <span className="w-20 shrink-0 text-[10px] uppercase tracking-wide text-slate-500">
+      <span className="w-20 shrink-0 font-mono text-[10px] uppercase tracking-wide text-ink-dim">
         {label}
       </span>
-      <span className="min-w-0 flex-1 break-words text-[11px] text-slate-300">
+      <span className="min-w-0 flex-1 break-words text-[11px] text-ink-mid">
         {children}
       </span>
     </div>
@@ -114,18 +110,18 @@ function MailDetail({ m }: { m: MailMessage }) {
   const conflicts = m.conflicts ?? [];
   const live = liveDot(m);
   return (
-    <div className="mt-2 space-y-1.5 border-t border-slate-800/70 pt-2">
+    <div className="mt-2 space-y-1.5 border-t border-line pt-2">
       <DetailRow label="route">
-        <span className="text-slate-200">{fromFull}</span>
-        <span className="text-slate-600"> → </span>
-        <span className="text-slate-200">{toFull}</span>
+        <span className="text-ink">{fromFull}</span>
+        <span className="text-ink-dim"> → </span>
+        <span className="text-ink">{toFull}</span>
       </DetailRow>
       {m.body && <DetailRow label="body">{m.body}</DetailRow>}
       <div className="flex flex-wrap gap-x-4 gap-y-1.5">
         {m.cap && <DetailRow label="capability">{m.cap}</DetailRow>}
         {m.bead_id && (
           <DetailRow label="bead">
-            <span className="font-mono text-[10px] text-slate-400">
+            <span className="font-mono text-[10px] text-ink-mid">
               {m.bead_id}
             </span>
           </DetailRow>
@@ -139,10 +135,10 @@ function MailDetail({ m }: { m: MailMessage }) {
               const exp = fmtExpires(lease.expires);
               return (
                 <div key={`${lease.path}-${i}`} className="leading-snug">
-                  <span className="font-mono text-[10px] text-teal-300">
+                  <span className="font-mono text-[10px] text-ink-mid">
                     {lease.path ?? leasePathName(lease)}
                   </span>
-                  <span className="ml-1.5 text-[10px] text-slate-500">
+                  <span className="ml-1.5 text-[10px] text-ink-dim">
                     {lease.exclusive === false ? "shared" : "exclusive"}
                     {exp ? ` · ${exp}` : ""}
                   </span>
@@ -154,7 +150,7 @@ function MailDetail({ m }: { m: MailMessage }) {
       )}
       {conflicts.length > 0 && (
         <DetailRow label="conflicts">
-          <span className="text-rose-300">
+          <span className="text-fail">
             {conflicts.map((c) => c.path).filter(Boolean).join(", ")}
           </span>
         </DetailRow>
@@ -162,7 +158,7 @@ function MailDetail({ m }: { m: MailMessage }) {
 
       {/* The Agent Mail system record: proof this is a genuine message, not a
           cosmetic event. Falls back to a clear "mirror only" note when offline. */}
-      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-800/50 pt-1.5 text-[10px] text-slate-500">
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/50 pt-1.5 text-[10px] text-ink-dim">
         {live && (
           <span className="inline-flex items-center gap-1">
             <span
@@ -174,22 +170,22 @@ function MailDetail({ m }: { m: MailMessage }) {
         )}
         {m.mailId != null && (
           <span>
-            msg <span className="font-mono text-slate-400">#{m.mailId}</span>
+            msg <span className="font-mono text-ink-mid">#{m.mailId}</span>
           </span>
         )}
         {m.threadId && (
           <span>
             thread{" "}
-            <span className="font-mono text-slate-400">{m.threadId}</span>
+            <span className="font-mono text-ink-mid">{m.threadId}</span>
           </span>
         )}
         {m.importance && m.importance !== "normal" && (
-          <span className="text-amber-300/80">{m.importance}</span>
+          <span className="text-accent-bright/80">{m.importance}</span>
         )}
         {m.projectSlug && (
           <span>
             project{" "}
-            <span className="font-mono text-slate-400">{m.projectSlug}</span>
+            <span className="font-mono text-ink-mid">{m.projectSlug}</span>
           </span>
         )}
       </div>
@@ -210,13 +206,13 @@ export function AgentMailDrawer({
   // Which rows are expanded into their full Agent Mail record (by stable key).
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const toggle = (key: string) =>
+  const toggle = useCallback((key: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
-    });
+    }), []);
 
   // Keep the latest message in view while the drawer is open and growing.
   useEffect(() => {
@@ -262,23 +258,23 @@ export function AgentMailDrawer({
       <aside
         aria-hidden={!open}
         inert={!open}
-        className={`absolute right-0 top-0 z-40 flex h-full w-[440px] max-w-[92vw] flex-col border-l border-cyan-500/25 bg-slate-950/90 backdrop-blur transition-transform duration-300 ${
+        className={`absolute right-0 top-0 z-40 flex h-full w-[440px] max-w-[92vw] flex-col border-l border-accent/25 bg-panel/90 backdrop-blur transition-transform duration-300 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
-        <header className="flex items-center justify-between border-b border-slate-800/70 px-4 py-3">
+        <header className="flex items-center justify-between border-b border-line/70 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold tracking-tight text-slate-100">
+            <span className="text-sm font-semibold tracking-tight text-ink">
               Agent Mail
             </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[9px] text-cyan-300/90">
-              <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 font-mono text-[9px] text-accent/90">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent" />
               {messages.length} msg
             </span>
           </div>
           <button
             onClick={onClose}
-            className="rounded-md px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-slate-800/60 hover:text-slate-200"
+            className="rounded-md px-2 py-1 text-xs text-ink-mid transition-colors hover:bg-raised/60 hover:text-ink"
           >
             close
           </button>
@@ -286,23 +282,22 @@ export function AgentMailDrawer({
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
           {messages.length === 0 ? (
-            <div className="mt-12 text-center text-xs text-slate-600">
+            <div className="mt-12 text-center text-xs text-ink-dim">
               no messages yet. launch a run to watch the swarm talk.
             </div>
           ) : (
             groups.map(([version, msgs]) => (
               <section key={version} className="mb-4">
-                <div className="sticky top-0 z-10 -mx-3 mb-2 flex items-center justify-between bg-slate-950/90 px-3 py-1 backdrop-blur">
-                  <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-violet-300/80">
+                <div className="sticky top-0 z-10 -mx-3 mb-2 flex items-center justify-between bg-panel/90 px-3 py-1 backdrop-blur">
+                  <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-ink-mid">
                     planner v{version}
                   </span>
-                  <span className="text-[10px] tabular-nums text-slate-600">
+                  <span className="text-[10px] tabular-nums text-ink-dim">
                     {msgs.length} msg
                   </span>
                 </div>
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col">
                   {msgs.map((m, i) => {
-                    const accent = KIND_ACCENT[m.kind] ?? KIND_ACCENT.note;
                     const capColor = capColorOf(m.cap);
                     // Content-stable key so expand state survives the mail window
                     // sliding (CockpitBoard caps the buffer): real messages key on
@@ -317,77 +312,99 @@ export function AgentMailDrawer({
                     return (
                       <div
                         key={key}
-                        className="rounded-lg border border-slate-800/70 bg-slate-900/40"
-                        style={{ borderLeft: `2px solid ${accent}` }}
+                        className="border-b border-line/40 last:border-b-0"
                       >
                         <button
                           type="button"
                           onClick={() => toggle(key)}
                           aria-expanded={isOpen}
-                          className="w-full rounded-lg px-2.5 py-2.5 text-left transition-colors hover:bg-slate-900/70"
+                          className="flex w-full items-start gap-3 px-2 py-2.5 text-left transition-colors hover:bg-raised/60"
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide">
-                              <span
-                                className="h-1.5 w-1.5 rounded-full"
-                                style={{ background: agentColor(m.from) }}
-                              />
-                              <span className="text-slate-300">{m.from}</span>
-                              <span className="text-slate-600">to</span>
-                              <span className="text-slate-400">{m.to}</span>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-1.5">
+                          {/* Sender avatar: identity icon on the LEFT, beside the
+                              content (Gmail-app row), not stacked on top of it. */}
+                          <span
+                            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold leading-none"
+                            style={{
+                              background: `${agentColor(m.from)}26`,
+                              color: agentColor(m.from),
+                            }}
+                            aria-hidden
+                          >
+                            {agentInitials(m.from)}
+                          </span>
+
+                          {/* Content column: sender→recipient, subject, snippet —
+                              each a single truncating line to the right of the
+                              avatar, exactly like a Gmail list row. */}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-baseline gap-2">
+                              <span className="min-w-0 flex-1 truncate text-[12px]">
+                                <span className="font-semibold text-ink">
+                                  {m.from}
+                                </span>
+                                <span className="text-ink-dim"> → {m.to}</span>
+                              </span>
                               {live && (
                                 <span
-                                  className="h-1.5 w-1.5 rounded-full"
+                                  className="h-1.5 w-1.5 shrink-0 rounded-full"
                                   style={{ background: live.color }}
                                   title={live.label}
                                 />
                               )}
-                              <span className="tabular-nums text-[10px] text-slate-600">
+                              <time className="shrink-0 tabular-nums text-[10px] text-ink-dim">
                                 {fmtTime(m.ts)}
-                              </span>
+                              </time>
+                            </div>
+
+                            <div className="mt-0.5 flex items-center gap-2">
                               <span
-                                className={`text-[9px] text-slate-600 transition-transform ${
+                                className={`min-w-0 flex-1 truncate text-[12.5px] font-medium leading-snug ${
+                                  m.kind === "grade-fail"
+                                    ? "text-fail"
+                                    : "text-ink"
+                                }`}
+                              >
+                                {m.subject}
+                              </span>
+                              {capColor && (
+                                <span
+                                  className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium"
+                                  style={{
+                                    background: `${capColor}22`,
+                                    color: capColor,
+                                  }}
+                                >
+                                  {m.cap}
+                                </span>
+                              )}
+                              <span
+                                className={`shrink-0 text-[9px] text-ink-dim transition-transform ${
                                   isOpen ? "rotate-90" : ""
                                 }`}
+                                aria-hidden
                               >
                                 ▸
                               </span>
                             </div>
-                          </div>
-                          <div className="mt-1 flex items-start justify-between gap-2">
-                            <span className="text-[12px] font-medium leading-snug text-slate-100">
-                              {m.subject}
-                            </span>
-                            {capColor && (
-                              <span
-                                className="mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium"
-                                style={{
-                                  background: `${capColor}22`,
-                                  color: capColor,
-                                }}
-                              >
-                                {m.cap}
-                              </span>
+
+                            {!isOpen && m.body && (
+                              <p className="mt-0.5 truncate text-[11px] leading-snug text-ink-mid">
+                                {m.body}
+                              </p>
+                            )}
+                            {!isOpen && hasLease && (
+                              <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] leading-snug text-ink-mid/80">
+                                <span aria-hidden>📎</span>
+                                {m.leases!
+                                  .map((l) => leasePathName(l))
+                                  .filter(Boolean)
+                                  .join(", ")}
+                              </p>
                             )}
                           </div>
-                          {!isOpen && m.body && (
-                            <div className="mt-0.5 truncate text-[11px] leading-snug text-slate-400">
-                              {m.body}
-                            </div>
-                          )}
-                          {!isOpen && hasLease && (
-                            <div className="mt-0.5 truncate text-[10px] leading-snug text-teal-300/80">
-                              {m.leases!
-                                .map((l) => leasePathName(l))
-                                .filter(Boolean)
-                                .join(", ")}
-                            </div>
-                          )}
                         </button>
                         {isOpen && (
-                          <div className="px-2.5 pb-2.5">
+                          <div className="pb-3 pl-14 pr-3">
                             <MailDetail m={m} />
                           </div>
                         )}

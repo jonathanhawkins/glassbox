@@ -31,6 +31,7 @@ import {
   dockPos,
   dockSlotCentered,
   hasDock,
+  type BeadDetail,
   type BeadState,
   type SkillState,
 } from "./types";
@@ -45,7 +46,10 @@ type AnimateOpts = { animation: { duration: number } };
  * canvas, so the board fits in the clear center and nothing hides under a dock.
  * These mirror the overlay geometry in CockpitBoard.tsx: left dock is
  * `left-5` + `w-[280px]`, right rail is `right-5` + `w-[380px]`, the header
- * runs along the top, and the docks sit `bottom-5`.
+ * runs along the top, and the docks sit `bottom-5`. The left and right insets
+ * are dynamic (the copilot panel and the right rail each collapse), so only
+ * `top`/`bottom` are read from here; see leftInset/rightInset and
+ * setCopilotOpen/setRailOpen.
  */
 const DOCK_INSETS = { left: 316, right: 416, top: 116, bottom: 28 } as const;
 
@@ -70,6 +74,13 @@ const MAX_FIT_ZOOM = 1.5;
 // setCopilotOpen() swaps between these and reframes.
 const COPILOT_LEFT_OPEN = 384;
 const COPILOT_LEFT_COLLAPSED = 56;
+
+// The right inset depends on the controls/curve/leaderboard/feed/legend rail (it
+// overlays the canvas): reserve room for the open rail so nothing hides under it,
+// and only a thin margin when it is collapsed so the board fills the reclaimed
+// width. setRailOpen() swaps between these and reframes.
+const RAIL_RIGHT_OPEN = 416;
+const RAIL_RIGHT_COLLAPSED = 56;
 
 const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -96,7 +107,10 @@ function shortTitle(title: string | undefined, capability?: string): string {
 type BeadRecord = {
   shapeId: TLShapeId;
   capability: string;
+  /** Shortened chip title (for the bead label). */
   title: string;
+  /** Full task title as the planner wrote it (for the inspector popover). */
+  fullTitle: string;
   label: string;
   backlogSlot: number;
   doneSlot: number;
@@ -109,6 +123,14 @@ export class BoardController {
   private beadByBeadId = new Map<string, BeadRecord>();
   private agentShapeId = new Map<string, TLShapeId>();
   private dockShapeId = new Map<string, TLShapeId>();
+  private activeWorkers = WORKER_POOL.length;
+  private frameBoundsOverride: { x: number; y: number; w: number; h: number } | null = null;
+  private workerPos: Record<string, { x: number; y: number }> | null = null;
+  // Real-data mode: bead events still MOVE beads, but the simulation's scripted agent-status
+  // side-effects (planner/coordinator/validator auto-"working") are suppressed, so statuses
+  // come only from explicit agent_status events fed from live session/sub-agent data. The
+  // original simulated cockpit never enables this, so it is unchanged.
+  private realMode = false;
   private workerResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Per-bead "land it" timers. animateShape's final settle goes through the
   // lock-respecting update path, so a locked bead never gets snapped exactly onto
@@ -124,6 +146,9 @@ export class BoardController {
   // Left screen-space inset (px) reserved for the copilot panel; updated by
   // setCopilotOpen so the camera frames the board clear of the panel.
   private leftInset = COPILOT_LEFT_OPEN;
+  // Right screen-space inset (px) reserved for the controls/feed/legend rail;
+  // updated by setRailOpen so the camera frames the board clear of the rail.
+  private rightInset = RAIL_RIGHT_OPEN;
 
   // Callbacks the Cockpit overlay listens to for header readouts.
   onGoal?: (goal: string) => void;
@@ -148,6 +173,26 @@ export class BoardController {
 
   constructor(editor: Editor) {
     this.editor = editor;
+  }
+
+  /**
+   * Resolve a bead id to its full task detail for the inspector popover, reading
+   * the live shape state (so the state badge matches the board right now) and the
+   * record's full title + current worker. Returns null for an unknown bead.
+   */
+  beadDetail(beadId: string): BeadDetail | null {
+    const rec = this.beadByBeadId.get(beadId);
+    if (!rec) return null;
+    const shape = this.editor.getShape(rec.shapeId) as BeadShape | undefined;
+    const state = (shape?.props.state as BeadState) ?? "backlog";
+    return {
+      beadId,
+      label: rec.label,
+      title: rec.fullTitle || rec.title,
+      capability: rec.capability,
+      state,
+      worker: rec.worker,
+    };
   }
 
   /** Push the current skill state to the overlay (copying the array fields). */
@@ -193,12 +238,12 @@ export class BoardController {
       () => {
         this.clearAll();
         for (const agent of AGENTS) {
-          const pos = AGENT_POS[agent];
+          const pos = this.posOf(agent);
           if (!pos) continue;
           // Each worker gets a dashed task dock beneath its lane (drawn first so
           // claimed beads stack on top of it).
           if (hasDock(agent)) {
-            const dPos = dockPos(agent);
+            const dPos = dockPos(agent, this.posOf(agent));
             const dId = createShapeId(`dock:${agent}`);
             this.dockShapeId.set(agent, dId);
             this.editor.createShape<DockShape>({
@@ -230,6 +275,8 @@ export class BoardController {
       },
       { ignoreShapeLock: true },
     );
+    this.arrangeWorkers();
+    this.computeFrameBounds();
     this.frameCamera({ immediate: true });
   }
 
@@ -260,7 +307,9 @@ export class BoardController {
     const clear = this.clearRect();
     if (!clear) return;
 
-    const board = BOARD_BOUNDS;
+    // When a swarm shows fewer than all workers, frame just the active swarm (so the
+    // removed lanes leave no empty space) instead of the full board bounds.
+    const board = this.frameBoundsOverride ?? BOARD_BOUNDS;
     const z = clampNum(
       Math.min(clear.w / board.w, clear.h / board.h),
       MIN_FIT_ZOOM,
@@ -279,12 +328,40 @@ export class BoardController {
   }
 
   /**
+   * Center the camera on a single node and zoom in, so the user can step through the graph
+   * (planner -> coordinator -> workers -> validator -> improver) and look at each node in turn.
+   * Used by the node-cycler nav buttons.
+   */
+  focusAgent(agent: string) {
+    const clear = this.clearRect();
+    const p = this.posOf(agent);
+    if (!clear || !p) return;
+    const cx = p.x + LANE_W / 2;
+    const cy = p.y + LANE_H / 2 + 40; // bias down so the node's beads/dock sit in frame too
+    const z = 1.8; // zoom in well past whole-board fit so the focused node clearly stands out
+    // Same projection as frameCamera: screen = (P + camera) * zoom, so camera = target/zoom - P.
+    const x = clear.cx / z - cx;
+    const y = clear.cy / z - cy;
+    this.editor.setCamera({ x, y, z }, { animation: { duration: 320 } });
+  }
+
+  /**
    * Reserve more or less left inset for the copilot panel, then reframe. The
    * cockpit calls this when the user collapses or expands the panel so the graph
    * stays fully visible (and uses the reclaimed width when the panel is hidden).
    */
   setCopilotOpen(open: boolean) {
     this.leftInset = open ? COPILOT_LEFT_OPEN : COPILOT_LEFT_COLLAPSED;
+    this.frameCamera();
+  }
+
+  /**
+   * Reserve more or less right inset for the controls/feed/legend rail, then
+   * reframe. The cockpit calls this when the user collapses or expands the rail
+   * so the graph stays fully visible (and uses the reclaimed width when hidden).
+   */
+  setRailOpen(open: boolean) {
+    this.rightInset = open ? RAIL_RIGHT_OPEN : RAIL_RIGHT_COLLAPSED;
     this.frameCamera();
   }
 
@@ -297,8 +374,9 @@ export class BoardController {
     const vsb = this.editor.getViewportScreenBounds();
     if (!vsb || vsb.w < 1 || vsb.h < 1) return null;
 
-    let { right, top, bottom } = DOCK_INSETS;
+    let { top, bottom } = DOCK_INSETS;
     let left = this.leftInset;
+    let right = this.rightInset;
     const hSum = left + right;
     const hMax = vsb.w * MAX_INSET_FRAC.x;
     if (hSum > hMax) {
@@ -363,6 +441,26 @@ export class BoardController {
     return { x: DONE_RAIL.x + col * DONE_RAIL.gapX, y: DONE_RAIL.y + row * DONE_RAIL.gapY };
   }
 
+  /**
+   * Re-pack the backlog grid so chips occupy slots 0..n-1 with no holes. A bead
+   * occupies the grid while it has no worker and has not reached the done rail
+   * (doneSlot < 0); claimed/done beads are excluded. Order is preserved by current
+   * backlogSlot so chips slide up to fill the gap a dispatched task left behind.
+   */
+  private compactBacklog() {
+    const inBacklog = Array.from(this.beadByBeadId.values())
+      .filter((r) => r.worker === undefined && r.doneSlot < 0)
+      .sort((a, b) => a.backlogSlot - b.backlogSlot);
+    inBacklog.forEach((r, i) => {
+      if (r.backlogSlot !== i) {
+        r.backlogSlot = i;
+        const p = this.backlogPos(i);
+        this.moveBead(r, p.x, p.y, ANIM_FAST);
+      }
+    });
+    this.nextBacklogSlot = inBacklog.length;
+  }
+
   private setAgentStatus(agent: string, status: string) {
     const id = this.agentShapeId.get(agent);
     if (!id) return;
@@ -382,6 +480,120 @@ export class BoardController {
 
   private setAllAgents(status: string) {
     for (const agent of this.agentShapeId.keys()) this.setAgentStatus(agent, status);
+  }
+
+  /**
+   * Show only the first `n` worker lanes as active and dim the rest, so the board reflects
+   * the swarm's chosen worker count. Persists across re-layouts (re-applied in layout()).
+   */
+  /** Turn on real-data mode (no simulated status side-effects). Used by the /swarm board. */
+  setRealMode(on: boolean) {
+    this.realMode = on;
+  }
+
+  setActiveWorkers(n: number) {
+    this.activeWorkers = Math.max(1, Math.min(WORKER_POOL.length, Math.floor(n) || 1));
+    // Fewer than all workers -> a centered column (so the middle worker is straight on the
+    // spine); all four -> the original 2x2 grid.
+    this.workerPos =
+      this.activeWorkers < WORKER_POOL.length ? this.computeColumn(this.activeWorkers) : null;
+    this.arrangeWorkers();
+    this.computeFrameBounds();
+    this.frameCamera();
+  }
+
+  private posOf(agent: string): { x: number; y: number } {
+    return this.workerPos?.[agent] ?? AGENT_POS[agent];
+  }
+
+  // A centered vertical column of `n` workers between the coordinator and the validator, so
+  // the middle worker sits straight on the spine and the others fan symmetrically above/below.
+  private computeColumn(n: number): Record<string, { x: number; y: number }> {
+    const bandL = AGENT_POS.coordinator.x + LANE_W;
+    const bandR = AGENT_POS.validator.x;
+    const colX = bandL + (bandR - bandL) / 2 - LANE_W / 2;
+    const spine = AGENT_POS.coordinator.y + LANE_H / 2;
+    const ROW = 244; // lane + dock + gap, so docks never overlap the next lane
+    const map: Record<string, { x: number; y: number }> = {};
+    for (let i = 0; i < n; i += 1) {
+      const cy = spine + (i - (n - 1) / 2) * ROW;
+      map[`worker-${i + 1}`] = { x: colX, y: cy - LANE_H / 2 };
+    }
+    return map;
+  }
+
+  // Move the active workers (lanes + docks + their beads) to the current layout and remove
+  // the inactive lanes from view, so the board redraws to just the live swarm.
+  private arrangeWorkers() {
+    this.editor.run(
+      () => {
+        WORKER_POOL.forEach((worker, i) => {
+          const aId = this.agentShapeId.get(worker);
+          const dId = this.dockShapeId.get(worker);
+          if (i < this.activeWorkers) {
+            const p = this.posOf(worker);
+            const d = dockPos(worker, p);
+            if (aId) this.editor.updateShape({ id: aId, type: "agent", x: p.x, y: p.y, opacity: 1 });
+            if (dId) this.editor.updateShape({ id: dId, type: "dock", x: d.x, y: d.y, opacity: 1 });
+          } else {
+            if (aId) this.editor.updateShape({ id: aId, type: "agent", opacity: 0 });
+            if (dId) this.editor.updateShape({ id: dId, type: "dock", opacity: 0 });
+          }
+        });
+      },
+      { ignoreShapeLock: true },
+    );
+    // Re-center any beads sitting on the workers that just moved.
+    for (let i = 0; i < this.activeWorkers; i += 1) {
+      const worker = WORKER_POOL[i];
+      const anchor = Array.from(this.beadByBeadId.values()).find((r) => r.worker === worker);
+      if (anchor) this.placeOnWorker(anchor, worker, ANIM_FAST);
+    }
+  }
+
+  // Frame just the active swarm (planner, coordinator, the active workers + docks, validator,
+  // improver) when the layout differs from the full grid, so it reads tight with no gaps.
+  private computeFrameBounds() {
+    if (this.activeWorkers >= WORKER_POOL.length && !this.workerPos) {
+      this.frameBoundsOverride = null;
+      return;
+    }
+    const agents = [
+      "planner",
+      "coordinator",
+      "validator",
+      "improver",
+      ...WORKER_POOL.slice(0, this.activeWorkers),
+    ];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const a of agents) {
+      const p = this.posOf(a);
+      if (!p) continue;
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + LANE_W);
+      maxY = Math.max(maxY, p.y + LANE_H);
+      if (hasDock(a)) {
+        const d = dockPos(a, this.posOf(a));
+        minY = Math.min(minY, d.y);
+        maxX = Math.max(maxX, d.x + DOCK_W);
+        maxY = Math.max(maxY, d.y + DOCK_H);
+      }
+    }
+    if (!Number.isFinite(minX)) {
+      this.frameBoundsOverride = null;
+      return;
+    }
+    const PAD = 36;
+    this.frameBoundsOverride = {
+      x: minX - PAD,
+      y: minY - PAD,
+      w: maxX - minX + PAD * 2,
+      h: maxY - minY + PAD * 2,
+    };
   }
 
   private updateBeadState(rec: BeadRecord, state: BeadState) {
@@ -458,6 +670,7 @@ export class BoardController {
       shapeId,
       capability,
       title: cleanTitle,
+      fullTitle: title?.trim() || cleanTitle,
       label,
       backlogSlot: slot,
       doneSlot: -1,
@@ -474,6 +687,7 @@ export class BoardController {
           props: {
             w: BEAD_W,
             h: BEAD_H,
+            beadId,
             label,
             title: cleanTitle,
             capability,
@@ -522,7 +736,7 @@ export class BoardController {
       if (r.worker === worker) own.push(r);
     }
     own.forEach((r, i) => {
-      const c = dockSlotCentered(worker, i, own.length);
+      const c = dockSlotCentered(worker, i, own.length, this.posOf(worker));
       this.moveBead(r, c.x, c.y, r === rec ? opts : ANIM_FAST);
     });
     this.setDockActive(worker, true);
@@ -574,7 +788,7 @@ export class BoardController {
       case "bead_created": {
         const cap = String(ev.payload?.capability ?? "");
         if (ev.bead_id) this.ensureBead(ev.bead_id, cap, ev.title ?? "", "backlog");
-        this.setAgentStatus("planner", "working");
+        if (!this.realMode) this.setAgentStatus("planner", "working");
         // A created bead's capability is a category this plan covers (fallback if
         // plan_started lacked it). harness is structural, not a scoring tile.
         if (cap && cap !== "harness" && !this.skill.covered.includes(cap)) {
@@ -591,8 +805,12 @@ export class BoardController {
         const worker = this.resolveWorker(ev);
         this.updateBeadState(rec, "claimed");
         this.placeOnWorker(rec, worker, ANIM_FAST);
+        // The chip left the backlog grid; slide the rest up to close the gap.
+        this.compactBacklog();
         this.setAgentStatus(worker, "working");
-        this.setAgentStatus("coordinator", "working");
+        // The worker working is real (a real sub-agent landed on this lane); the coordinator
+        // status is the simulation's scripted side-effect, so suppress it in real-data mode.
+        if (!this.realMode) this.setAgentStatus("coordinator", "working");
         // Settle into working a beat after it lands on the lane.
         window.setTimeout(() => {
           if (this.beadByBeadId.has(ev.bead_id as string)) {
@@ -617,7 +835,9 @@ export class BoardController {
         if (rec.doneSlot < 0) rec.doneSlot = this.nextDoneSlot++;
         const p = this.donePos(rec.doneSlot);
         this.moveBead(rec, p.x, p.y, ANIM);
-        this.setAgentStatus("validator", "working");
+        // In case it went straight from backlog to done, keep the grid gap-free.
+        this.compactBacklog();
+        if (!this.realMode) this.setAgentStatus("validator", "working");
         if (worker) {
           // Flash the worker done, then ease it back to idle for the next bead.
           this.setAgentStatus(worker, "done");
@@ -822,6 +1042,9 @@ export class BoardController {
         this.updateBeadState(rec, "done");
       }
     }
+    // Beads pulled onto worker docks / the done rail vacated backlog slots while
+    // seeding; pack the survivors so a mid-run reload renders a gap-free grid.
+    this.compactBacklog();
   }
 
   dispose() {

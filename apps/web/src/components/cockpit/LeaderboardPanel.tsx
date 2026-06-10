@@ -14,9 +14,9 @@ import type { TaskName } from "@/lib/cockpit/tasks";
 import { CollapseButton } from "./CollapseButton";
 
 const STATUS_DOT: Record<string, string> = {
-  passed: "bg-emerald-400",
-  partial: "bg-amber-400",
-  failed: "bg-rose-400",
+  passed: "bg-pass",
+  partial: "bg-accent-bright",
+  failed: "bg-fail",
 };
 
 /** Derive the project's Weave root from any row's eval URL, for the "all evals" link. */
@@ -57,7 +57,7 @@ export function LeaderboardPanel({ activeTask }: { activeTask: TaskName }) {
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <CollapseButton open={open} onClick={() => setOpen((o) => !o)} label="leaderboard" />
-          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-mid">
             leaderboard
           </span>
         </div>
@@ -66,7 +66,7 @@ export function LeaderboardPanel({ activeTask }: { activeTask: TaskName }) {
             href={evalsHref}
             target="_blank"
             rel="noreferrer"
-            className="text-[10px] text-cyan-400/80 underline-offset-2 hover:underline"
+            className="text-[10px] text-accent/80 underline-offset-2 hover:underline"
           >
             open evals in Weave ↗
           </a>
@@ -74,7 +74,7 @@ export function LeaderboardPanel({ activeTask }: { activeTask: TaskName }) {
       </div>
 
       {!open ? null : sorted.length === 0 ? (
-        <div className="mt-1 flex items-center justify-center py-4 text-xs text-slate-600">
+        <div className="mt-1 flex items-center justify-center py-4 text-xs text-ink-dim">
           {loaded ? "waiting for the first graded run" : "loading leaderboard..."}
         </div>
       ) : (
@@ -82,29 +82,29 @@ export function LeaderboardPanel({ activeTask }: { activeTask: TaskName }) {
           <ul className="flex flex-col gap-1">
             {sorted.map((r) => {
               const acc = Math.max(0, Math.min(1, r.accuracy));
-              const dot = (r.status && STATUS_DOT[r.status]) || "bg-slate-500";
+              const dot = (r.status && STATUS_DOT[r.status]) || "bg-ink-dim";
               return (
                 <li
                   key={r.version}
-                  className="flex items-center gap-2 rounded-lg border border-slate-800/60 bg-slate-900/40 px-2 py-1 text-[11px] tabular-nums"
+                  className="flex items-center gap-2 rounded-lg border border-line bg-raised/40 px-2 py-1 text-[11px] tabular-nums"
                 >
                   <span
                     className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`}
                     title={r.status ?? "unknown"}
                   />
-                  <span className="w-7 shrink-0 font-medium text-violet-300">
+                  <span className="w-7 shrink-0 font-mono font-medium text-ink-mid">
                     {r.version === bestVersion ? "★" : ""}v{r.version}
                   </span>
-                  <span className="w-20 shrink-0 truncate text-slate-400" title={r.added_category ?? "baseline"}>
+                  <span className="w-20 shrink-0 truncate text-ink-mid" title={r.added_category ?? "baseline"}>
                     {r.added_category ? `+${r.added_category}` : "baseline"}
                   </span>
-                  <span className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-800/80">
+                  <span className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-raised/80">
                     <span
-                      className="absolute inset-y-0 left-0 rounded-full bg-cyan-400/80"
+                      className="absolute inset-y-0 left-0 rounded-full bg-accent/80"
                       style={{ width: `${acc * 100}%` }}
                     />
                   </span>
-                  <span className="w-12 shrink-0 text-right text-cyan-300">
+                  <span className="w-12 shrink-0 text-right text-accent">
                     {(acc * 100).toFixed(1)}%
                   </span>
                   <span className="w-12 shrink-0 text-right">
@@ -113,13 +113,13 @@ export function LeaderboardPanel({ activeTask }: { activeTask: TaskName }) {
                         href={r.weave_eval_url}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-cyan-400/80 underline-offset-2 hover:underline"
+                        className="text-accent/80 underline-offset-2 hover:underline"
                         title="open this version's Weave Evaluation"
                       >
                         Weave ↗
                       </a>
                     ) : (
-                      <span className="text-slate-600">-</span>
+                      <span className="text-ink-dim">-</span>
                     )}
                   </span>
                 </li>

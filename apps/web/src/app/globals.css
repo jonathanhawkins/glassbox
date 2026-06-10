@@ -1,14 +1,75 @@
 @import "tailwindcss";
 
 :root {
-  /* Glassbox is a dark cockpit at all times. */
-  --background: #060a14;
-  --foreground: #e2e8f0;
+  /* Glassbox is a dark cockpit at all times. One warm near-black, one orange
+     accent, disciplined grayscale. Never blue. See the design-token table in
+     the redesign plan. (factory.ai visual system) */
+
+  /* Warm near-black neutrals (stone-tinted, not navy). */
+  --canvas: #0b0b0c; /* app base */
+  --panel: #141416; /* cards, panels, drawers */
+  --raised: #1c1c1f; /* hover / elevated */
+  --line: #26262a; /* solid 1px borders */
+  --line-soft: rgba(255, 255, 255, 0.06); /* hairline dividers */
+
+  /* Ink (text) ramp. */
+  --ink: #f5f5f4; /* primary text */
+  --ink-mid: #a1a1a6; /* secondary text */
+  --ink-dim: #6e6e73; /* labels, tertiary */
+  --ink-faint: #46464b; /* grid lines, disabled */
+
+  /* The single vivid hue. */
+  --accent: #ff6a1a; /* brand, active/running, primary CTA */
+  --accent-bright: #ff8a3d; /* active dot, hover, hot/new */
+  --accent-bg: rgba(255, 106, 26, 0.1);
+  --accent-line: rgba(255, 106, 26, 0.35);
+
+  /* Muted semantic pass/fail (desaturated, legible on near-black). */
+  --pass: #5ba372;
+  --fail: #d85a52;
+
+  /* Muted categorical palette: the ONLY place non-accent color is allowed, for
+     data viz that must distinguish many series (board capabilities, agent
+     lanes, loop archetypes). All desaturated so nothing competes with the one
+     vivid accent. Mirrored as hex in lib/cockpit/types.ts (CAP_COLORS /
+     AGENT_COLORS) and lib/fleet/archetypes.ts; documented here as the source of
+     truth for the set. Never add a saturated/neon hue. */
+  --cat-slate: #7e8aa2;
+  --cat-sand: #a88a5c;
+  --cat-sage: #6f9e83;
+  --cat-clay: #b06f58;
+  --cat-steel: #8d8f9c;
+  --cat-mauve: #9c84a8;
+  --cat-teal: #5e94a8;
+  --cat-rosewood: #a77e86;
+
+  /* Aliases kept for the body rule + any var(--background) consumers. */
+  --background: var(--canvas);
+  --foreground: var(--ink);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--canvas);
+  --color-foreground: var(--ink);
+
+  /* Surfaces -> bg-canvas / bg-panel / bg-raised. */
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+
+  /* Ink -> text-ink / text-ink-mid / text-ink-dim / text-ink-faint. */
+  --color-ink: var(--ink);
+  --color-ink-mid: var(--ink-mid);
+  --color-ink-dim: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
+
+  /* Accent + semantics -> text-accent / bg-accent/10 / border-accent / text-pass ... */
+  --color-accent: var(--accent);
+  --color-accent-bright: var(--accent-bright);
+  --color-pass: var(--pass);
+  --color-fail: var(--fail);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -66,11 +127,31 @@ body {
    overrides of the stock welcome <h1> and chip spacing are gone. What remains
    are a few light touches for the conversation state in the narrow rail. */
 
-/* Comfortable composer typography for the small panel. */
+/* Comfortable composer typography for the small panel. A short placeholder
+   keeps the composer a single line in the narrow rail; tighter vertical padding
+   keeps the pill sleek rather than tall. */
 .glassbox-copilot-chat textarea,
 .glassbox-copilot-chat input[type="text"] {
   font-size: 0.875rem !important; /* 14px */
   line-height: 1.4 !important;
+}
+/* Tighter composer so the pill reads sleek, not tall. Scoped through the
+   copilotKitInput wrapper to outrank the SDK's cpk:py-3 utility on the textarea. */
+.glassbox-copilot-chat .copilotKitInput textarea {
+  padding-top: 0.5rem !important; /* 8px (was 12px) */
+  padding-bottom: 0.5rem !important;
+}
+/* The SDK builds the composer as a grid with cpk:py-2 padding and a
+   cpk:min-h-[50px] textarea cell, which renders a chunky 66px pill even though
+   the +/send icon buttons are only 36px. Drop the grid's vertical padding and
+   collapse the textarea cell to the button height so the pill reads as a tight,
+   sleek single line (44px) in the narrow rail. */
+.glassbox-copilot-chat .copilotKitInput > div {
+  padding-top: 0.25rem !important; /* 4px (was 8px) */
+  padding-bottom: 0.25rem !important;
+}
+.glassbox-copilot-chat .copilotKitInput > div > div:has(> textarea) {
+  min-height: 2.25rem !important; /* 36px, matches the icon buttons */
 }
 
 /* Top breathing room for the scrolling message stream so the first reply does
@@ -78,4 +159,18 @@ body {
    chat's own max-w content wrapper.) */
 .glassbox-copilot-chat .copilotKitMessages {
   padding-top: 0.5rem;
+}
+
+/* Suggestion pills: word-wrap instead of clip. The v2 SDK ships the chips with a
+   fixed h-7/h-8 height, items-center, and an inner <span class="cpk:whitespace-nowrap">,
+   so long goal titles (the AlgoTune chip) overflow the narrow rail and get cut off.
+   Let the pill grow to fit and unset the inner span's nowrap so text wraps. */
+.glassbox-suggestions > button {
+  height: auto !important;
+  min-height: 2rem;
+  align-items: flex-start !important;
+}
+.glassbox-suggestions > button > span {
+  white-space: normal !important;
+  overflow-wrap: anywhere;
 }

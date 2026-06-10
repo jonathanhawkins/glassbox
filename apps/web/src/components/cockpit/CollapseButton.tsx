@@ -20,7 +20,7 @@ export function CollapseButton({
       onClick={onClick}
       aria-expanded={open}
       title={open ? `Hide ${label}` : `Show ${label}`}
-      className="grid h-5 w-5 shrink-0 place-items-center rounded-md border border-slate-700/60 bg-slate-900/60 text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200"
+      className="grid h-5 w-5 shrink-0 place-items-center rounded-md border border-line bg-raised/60 text-ink-mid transition hover:bg-raised hover:text-ink"
     >
       <svg
         viewBox="0 0 12 12"

@@ -11,7 +11,7 @@ const CockpitBoard = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-full w-full items-center justify-center bg-[#060a14] text-sm text-slate-500">
+      <div className="flex h-full w-full items-center justify-center bg-canvas font-mono text-sm text-ink-dim">
         booting cockpit...
       </div>
     ),

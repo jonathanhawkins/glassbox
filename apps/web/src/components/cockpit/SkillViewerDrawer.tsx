@@ -144,32 +144,32 @@ export function SkillViewerDrawer({
       />
       <aside
         aria-hidden={!open}
-        className={`fixed right-0 top-0 z-50 flex h-full w-[min(680px,94vw)] flex-col border-l border-violet-500/30 bg-slate-950/95 backdrop-blur transition-transform duration-300 ${
+        className={`fixed right-0 top-0 z-50 flex h-full w-[min(680px,94vw)] flex-col border-l border-line bg-panel/95 backdrop-blur transition-transform duration-300 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-slate-800/70 px-4 py-3">
+        <div className="flex items-start justify-between gap-3 border-b border-line/70 px-4 py-3">
           <div>
-            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-violet-300/90">
+            <div className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-mid">
               planner skill
             </div>
-            <div className="mt-0.5 text-sm text-slate-300">
+            <div className="mt-0.5 text-sm text-ink-mid">
               the skill the planner rewrites to improve itself
             </div>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-xs text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200"
+            className="rounded-lg border border-line/60 bg-raised/60 px-2 py-1 text-xs text-ink-mid transition hover:bg-raised/60 hover:text-ink"
           >
             close
           </button>
         </div>
 
-        <div className="flex items-center gap-2 border-b border-slate-800/70 px-4 py-2.5">
+        <div className="flex items-center gap-2 border-b border-line/70 px-4 py-2.5">
           <button
             onClick={() => go(-1)}
             disabled={idx <= 0}
-            className="rounded-md border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-xs text-slate-300 transition hover:bg-slate-800/60 disabled:opacity-40"
+            className="rounded-md border border-line/60 bg-raised/60 px-2 py-1 text-xs text-ink-mid transition hover:bg-raised/60 disabled:opacity-40"
             aria-label="previous version"
           >
             {"◀"}
@@ -181,8 +181,8 @@ export function SkillViewerDrawer({
                 onClick={() => setIdx(i)}
                 className={`rounded-md px-2 py-1 text-[11px] tabular-nums transition ${
                   i === idx
-                    ? "border border-violet-500/60 bg-violet-500/15 text-violet-100"
-                    : "border border-slate-800/70 bg-slate-900/40 text-slate-500 hover:text-slate-300"
+                    ? "border border-line bg-white/[0.04] text-ink"
+                    : "border border-line/70 bg-raised/40 text-ink-dim hover:text-ink-mid"
                 }`}
               >
                 v{v.version}
@@ -192,13 +192,13 @@ export function SkillViewerDrawer({
           <button
             onClick={() => go(1)}
             disabled={idx >= maxIdx}
-            className="rounded-md border border-slate-700/60 bg-slate-900/60 px-2 py-1 text-xs text-slate-300 transition hover:bg-slate-800/60 disabled:opacity-40"
+            className="rounded-md border border-line/60 bg-raised/60 px-2 py-1 text-xs text-ink-mid transition hover:bg-raised/60 disabled:opacity-40"
             aria-label="next version"
           >
             {"▶"}
           </button>
           {cur && (
-            <span className="ml-auto text-[11px] tabular-nums text-slate-400">
+            <span className="ml-auto text-[11px] tabular-nums text-ink-mid">
               {coveredSet.size}/{order.length} covered
               {acc[cur.version] !== undefined
                 ? ` · ${(acc[cur.version] * 100).toFixed(0)}%`
@@ -208,7 +208,7 @@ export function SkillViewerDrawer({
         </div>
 
         {cur && (
-          <div className="flex flex-wrap gap-1.5 border-b border-slate-800/70 px-4 py-2.5">
+          <div className="flex flex-wrap gap-1.5 border-b border-line/70 px-4 py-2.5">
             {order.map((c) => {
               const on = coveredSet.has(c);
               const justAdded = !!prev && on && !new Set(prev.covered).has(c);
@@ -218,8 +218,8 @@ export function SkillViewerDrawer({
                   key={c}
                   className="rounded-full border px-2 py-0.5 text-[10px]"
                   style={{
-                    color: on ? color : "#64748b",
-                    borderColor: on ? `${color}66` : "rgba(100,116,139,0.3)",
+                    color: on ? color : "#6e6e73",
+                    borderColor: on ? `${color}66` : "rgba(255,255,255,0.14)",
                     background: on ? `${color}1f` : "transparent",
                     boxShadow: justAdded ? `0 0 8px ${color}` : undefined,
                   }}
@@ -234,9 +234,9 @@ export function SkillViewerDrawer({
 
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
           {error && !cur ? (
-            <div className="text-xs text-slate-500">{error}</div>
+            <div className="text-xs text-ink-dim">{error}</div>
           ) : (
-            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-slate-300">
+            <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-ink-mid">
               {(cur?.text ?? "").split("\n").map((line, i) => {
                 const t = line.trim();
                 const added = prev != null && t.length > 0 && !prevSet.has(t);
@@ -245,7 +245,7 @@ export function SkillViewerDrawer({
                     key={i}
                     className={
                       added
-                        ? "-mx-1 rounded-sm border-l-2 border-emerald-400/70 bg-emerald-500/10 px-1 text-emerald-200"
+                        ? "-mx-1 rounded-sm border-l-2 border-pass/70 bg-pass/10 px-1 text-pass"
                         : undefined
                     }
                   >
@@ -257,7 +257,7 @@ export function SkillViewerDrawer({
           )}
         </div>
 
-        <div className="border-t border-slate-800/70 px-4 py-2 text-[10px] text-slate-500">
+        <div className="border-t border-line/70 px-4 py-2 text-[10px] text-ink-dim">
           {cur
             ? `source: the task's planner skill, version ${cur.version} (read live via /api/skill)`
             : "source: the task's planner skill (read live via /api/skill)"}

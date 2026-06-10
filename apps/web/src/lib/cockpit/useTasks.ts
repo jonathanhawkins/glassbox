@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 
+import { pollWhileVisible } from "./pollWhileVisible";
 import { TASK_GOALS, type TaskMeta } from "./tasks";
 
 const CURATED_FALLBACK: TaskMeta[] = [
@@ -20,10 +21,27 @@ const CURATED_FALLBACK: TaskMeta[] = [
 
 let store: TaskMeta[] = CURATED_FALLBACK;
 let loaded = false;
+// Serialized last list so a poll returning the same tasks fires no re-renders. The
+// poll runs every 1.5s while a BYO task is still "discovering", and the switcher and
+// its consumers should only re-render when the task list actually changes.
+let snapshot = "";
 const subs = new Set<() => void>();
 
 function emit() {
   for (const fn of subs) fn();
+}
+
+/** Publish a new task list, notifying subscribers only when it actually changed
+ * (or on the first load, so consumers leave their unloaded state). */
+function publish(next: TaskMeta[]): void {
+  const nextSnapshot = JSON.stringify(next);
+  const wasLoaded = loaded;
+  store = next;
+  loaded = true;
+  if (nextSnapshot !== snapshot || !wasLoaded) {
+    snapshot = nextSnapshot;
+    emit();
+  }
 }
 
 function normalize(raw: unknown): TaskMeta[] {
@@ -49,12 +67,10 @@ function normalize(raw: unknown): TaskMeta[] {
 export async function refreshTasks(): Promise<void> {
   try {
     const res = await fetch("/api/tasks", { cache: "no-store" });
-    store = normalize(await res.json());
-    loaded = true;
-    emit();
+    publish(normalize(await res.json()));
   } catch {
-    loaded = true; // keep the fallback / last list
-    emit();
+    // keep the fallback / last list; publish() still flips `loaded` on first run
+    publish(store);
   }
 }
 
@@ -63,17 +79,30 @@ export async function refreshTasks(): Promise<void> {
 export function addTaskOptimistic(meta: TaskMeta): void {
   if (!store.some((t) => t.id === meta.id)) {
     store = [...store, meta];
+    // Keep the change-gate snapshot in sync so the next confirming poll, which
+    // returns this same task, does not fire a redundant re-render.
+    snapshot = JSON.stringify(store);
     emit();
   }
 }
 
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+// Visibility-aware: the discovering poll pauses while the tab is hidden and
+// catches up on return (pollWhileVisible). stopPoll is its cleanup; null when no
+// timer is armed.
+let stopPoll: (() => void) | null = null;
 
 function ensurePolling() {
-  if (pollTimer) return;
-  pollTimer = setInterval(() => {
+  if (stopPoll) return;
+  stopPoll = pollWhileVisible(() => {
     if (store.some((t) => t.discovering)) void refreshTasks();
   }, 1500);
+}
+
+function stopPolling() {
+  if (stopPoll) {
+    stopPoll();
+    stopPoll = null;
+  }
 }
 
 export type UseTasks = { tasks: TaskMeta[]; loaded: boolean };
@@ -88,6 +117,10 @@ export function useTasks(): UseTasks {
     if (!loaded) void refreshTasks();
     return () => {
       subs.delete(rerender);
+      // The 1.5s poll is module-level and would otherwise run for the tab's whole
+      // life. Stop it once no consumer is mounted; ensurePolling() re-arms it when
+      // a new subscriber appears.
+      if (subs.size === 0) stopPolling();
     };
   }, []);
 

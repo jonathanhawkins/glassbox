@@ -10,6 +10,16 @@ export const metadata: Metadata = {
   title: "Glassbox . Pitch",
   description:
     "Watch a self-improving swarm build real code, graded live against ground truth.",
+  openGraph: {
+    title: "Glassbox . Pitch",
+    description:
+      "Watch a self-improving swarm build real code, graded live against ground truth.",
+  },
+  twitter: {
+    title: "Glassbox . Pitch",
+    description:
+      "Watch a self-improving swarm build real code, graded live against ground truth.",
+  },
 };
 
 export default function DeckPage() {

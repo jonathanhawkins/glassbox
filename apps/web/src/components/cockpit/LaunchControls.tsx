@@ -18,7 +18,7 @@ import { useTasks } from "@/lib/cockpit/useTasks";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { CollapseButton } from "./CollapseButton";
 
-type Kind = "run" | "loop" | "live" | "reset";
+type Kind = "run" | "loop" | "live" | "optimize";
 
 export function LaunchControls({
   activeTask,
@@ -98,6 +98,16 @@ export function LaunchControls({
       "live",
       "Live inject",
     );
+  // The open-ended optimize loop: propose a new idea each round, keep only the
+  // grader-verified gains, climb the metric until genuinely stuck. Best for the byo
+  // speed tasks (speedkit, algotune).
+  const runOptimize = () =>
+    post(
+      "/api/optimize",
+      { goal: goal || DEFAULT_GOAL, max_versions: 12, task: activeTask },
+      "optimize",
+      "Optimize",
+    );
 
   // Switch the active task: tell the parent (so the curve + skill refetch for the
   // new task) and follow the new task's default goal in the input.
@@ -111,50 +121,28 @@ export function LaunchControls({
     [activeTask, onTaskChange, tasks],
   );
 
-  // Reset clears the live curve/board so the demo can restart clean, then reloads
-  // so the cockpit re-hydrates from the cleared state.
-  const resetBoard = useCallback(async () => {
-    setBusy("reset");
-    setNote("Resetting...");
-    try {
-      const res = await fetch("/api/reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: activeTask }),
-      });
-      if (res.ok) {
-        setNote("reset");
-        window.location.reload();
-      } else {
-        setNote(`reset failed (${res.status})`);
-        setBusy(null);
-      }
-    } catch (err) {
-      setNote(`reset failed: ${err instanceof Error ? err.message : "network"}`);
-      setBusy(null);
-    }
-  }, [activeTask]);
-
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <CollapseButton open={open} onClick={() => setOpen((o) => !o)} label="controls" />
-        <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+        <span className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-mid">
           controls
         </span>
       </div>
 
       {open && (
         <>
-          {/* Active-task switch: which target the swarm builds and grades. */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">
+          {/* Active-task switch: which target the swarm builds and grades.
+              The strip wraps onto multiple rows so every task label stays
+              fully legible instead of truncating as tasks accumulate. */}
+          <div className="flex items-start gap-2">
+            <span className="mt-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-ink-dim">
               task
             </span>
             <div
               role="tablist"
               aria-label="active task"
-              className="flex flex-1 rounded-lg border border-slate-700/70 bg-slate-900/60 p-0.5"
+              className="flex flex-1 flex-wrap gap-0.5 rounded-lg border border-line bg-raised/60 p-0.5"
             >
               {tasks.map((t) => {
                 const active = t.id === activeTask;
@@ -168,12 +156,10 @@ export function LaunchControls({
                     onClick={() => switchTask(t.id)}
                     disabled={busy !== null}
                     title={byo && t.repo ? t.repo : undefined}
-                    className={`flex-1 truncate rounded-md px-2 py-1 text-[11px] font-medium transition disabled:opacity-50 ${
+                    className={`rounded-md px-2 py-1 text-[11px] font-medium transition disabled:opacity-50 ${
                       active
-                        ? byo
-                          ? "bg-amber-500/15 text-amber-200 shadow-[0_0_8px] shadow-amber-500/20"
-                          : "bg-cyan-500/15 text-cyan-200 shadow-[0_0_8px] shadow-cyan-500/20"
-                        : "text-slate-400 hover:text-slate-200"
+                        ? "bg-accent/15 text-accent shadow-[0_0_8px] shadow-accent/20"
+                        : "text-ink-mid hover:text-ink"
                     }`}
                   >
                     {t.label ?? t.id}
@@ -185,7 +171,7 @@ export function LaunchControls({
                 onClick={() => setNewTaskOpen(true)}
                 disabled={busy !== null}
                 title="Bring your own repo"
-                className="rounded-md px-2 py-1 text-[11px] font-semibold text-amber-300/80 transition hover:text-amber-200 disabled:opacity-50"
+                className="rounded-md px-2 py-1 text-[11px] font-semibold text-ink-mid transition hover:text-ink disabled:opacity-50"
               >
                 + repo
               </button>
@@ -195,40 +181,40 @@ export function LaunchControls({
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             spellCheck={false}
-            className="w-full rounded-lg border border-slate-700/70 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-cyan-500/60"
+            className="w-full rounded-lg border border-line bg-raised/70 px-3 py-1.5 text-xs text-ink outline-none placeholder:text-ink-dim focus:border-accent/60"
             placeholder="goal"
           />
           <div className="flex gap-2">
             <button
               onClick={launchRun}
               disabled={busy !== null}
-              className="flex-1 rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:opacity-50"
+              className="flex-1 rounded-lg border border-accent/40 bg-accent/15 px-3 py-2 text-xs font-semibold text-accent transition hover:bg-accent/20 disabled:opacity-50"
             >
               {busy === "run" ? "Launching..." : "Launch run"}
             </button>
             <button
               onClick={runClimb}
               disabled={busy !== null}
-              className="flex-1 rounded-lg border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-xs font-semibold text-fuchsia-200 transition hover:bg-fuchsia-500/20 disabled:opacity-50"
+              className="flex-1 rounded-lg border border-line bg-white/[0.04] px-3 py-2 text-xs font-semibold text-ink-mid transition hover:bg-raised hover:text-ink disabled:opacity-50"
             >
               {busy === "loop" ? "Climbing..." : "Run climb"}
             </button>
           </div>
           <button
+            onClick={runOptimize}
+            disabled={busy !== null}
+            className="w-full rounded-lg border border-line bg-white/[0.04] px-3 py-2 text-xs font-semibold text-ink-mid transition hover:bg-raised hover:text-ink disabled:opacity-50"
+          >
+            {busy === "optimize" ? "Optimizing..." : "Optimize (open-ended)"}
+          </button>
+          <button
             onClick={runLive}
             disabled={busy !== null}
-            className="w-full rounded-lg border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-200 transition hover:bg-violet-500/20 disabled:opacity-50"
+            className="w-full rounded-lg border border-line bg-white/[0.04] px-3 py-2 text-xs font-semibold text-ink-mid transition hover:bg-raised hover:text-ink disabled:opacity-50"
           >
             {busy === "live" ? "Injecting..." : "Run live (inject)"}
           </button>
-          <button
-            onClick={resetBoard}
-            disabled={busy !== null}
-            className="w-full rounded-lg border border-slate-700/60 bg-slate-900/50 px-3 py-1.5 text-[11px] font-medium text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200 disabled:opacity-50"
-          >
-            {busy === "reset" ? "Resetting..." : "Reset board"}
-          </button>
-          {note && <span className="truncate text-[10px] text-slate-500">{note}</span>}
+          {note && <span className="truncate text-[10px] text-ink-dim">{note}</span>}
         </>
       )}
 

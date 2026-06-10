@@ -81,19 +81,19 @@ const recentLaunch: Record<string, number> = {};
 type Tone = "pending" | "ok" | "bad" | "muted" | "accent";
 
 const TONE_FRAME: Record<Tone, string> = {
-  pending: "border-slate-700/60 bg-slate-950/80 text-slate-200",
-  ok: "border-emerald-500/40 bg-emerald-500/5 text-emerald-100",
-  bad: "border-rose-500/40 bg-rose-500/5 text-rose-100",
-  muted: "border-slate-700/60 bg-slate-900/50 text-slate-300",
-  accent: "border-amber-500/40 bg-amber-500/[0.06] text-amber-100",
+  pending: "border-line bg-panel/80 text-ink",
+  ok: "border-pass/40 bg-pass/5 text-pass",
+  bad: "border-fail/40 bg-fail/5 text-fail",
+  muted: "border-line bg-raised/50 text-ink-mid",
+  accent: "border-accent/40 bg-accent/[0.06] text-accent",
 };
 
 const TONE_DOT: Record<Tone, string> = {
-  pending: "animate-pulse bg-amber-400",
-  ok: "bg-emerald-400",
-  bad: "bg-rose-400",
-  muted: "bg-slate-500",
-  accent: "bg-amber-400 shadow-[0_0_8px] shadow-amber-400/60",
+  pending: "animate-pulse bg-accent",
+  ok: "bg-pass",
+  bad: "bg-fail",
+  muted: "bg-ink-dim",
+  accent: "bg-accent shadow-accent/60",
 };
 
 function ArtifactCard({
@@ -162,7 +162,7 @@ function LaunchEffectCard({
 
   return (
     <ArtifactCard tone={tone} title={title}>
-      <div className="mt-1.5 text-[11px] text-slate-400">
+      <div className="mt-1.5 text-[11px] text-ink-mid">
         {pending
           ? "dispatching to the swarm..."
           : result.ok
@@ -207,7 +207,7 @@ function ImprovementApprovalCard({
         tone={declined ? "muted" : "ok"}
         title={declined ? "Improvement declined" : "Improvement approved"}
       >
-        <div className="mt-1.5 text-[11px] text-slate-400">{result}</div>
+        <div className="mt-1.5 text-[11px] text-ink-mid">{result}</div>
       </ArtifactCard>
     );
   }
@@ -241,13 +241,13 @@ function ImprovementApprovalCard({
   const busy = phase !== "idle";
   return (
     <ArtifactCard tone="accent" title="approval required" eyebrow>
-      <p className="mt-2 text-[12px] leading-relaxed text-slate-200">{planText}</p>
+      <p className="mt-2 text-[12px] leading-relaxed text-ink">{planText}</p>
       <div className="mt-3 flex gap-2">
         <button
           type="button"
           onClick={onApprove}
           disabled={busy}
-          className="flex-1 rounded-lg border border-cyan-500/50 bg-cyan-500/15 px-3 py-1.5 text-[12px] font-semibold text-cyan-100 transition-colors hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex-1 rounded-lg border border-accent/50 bg-accent/15 px-3 py-1.5 text-[12px] font-semibold text-accent transition-colors hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {phase === "approving" ? "Launching..." : "Approve & launch"}
         </button>
@@ -255,7 +255,7 @@ function ImprovementApprovalCard({
           type="button"
           onClick={onDecline}
           disabled={busy}
-          className="rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-1.5 text-[12px] font-medium text-slate-300 transition-colors hover:bg-slate-800/70 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg border border-line bg-raised/60 px-3 py-1.5 text-[12px] font-medium text-ink-mid transition-colors hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-60"
         >
           {phase === "declining" ? "..." : "Decline"}
         </button>

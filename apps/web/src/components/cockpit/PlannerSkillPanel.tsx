@@ -12,11 +12,12 @@
 // from skill.order, and groupColor/groupLabel keep the tokenizer palette while
 // deriving stable colors/labels for any other task's groups.
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { groupColor, groupLabel, type SkillState } from "@/lib/cockpit/types";
 import { useTaskGroups } from "@/lib/cockpit/useTaskGroups";
 
+import { CollapseButton } from "./CollapseButton";
 import { SkillViewerDrawer } from "./SkillViewerDrawer";
 
 export function PlannerSkillPanel({
@@ -27,7 +28,12 @@ export function PlannerSkillPanel({
   activeTask: import("@/lib/cockpit/tasks").TaskName;
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const covered = new Set(skill.covered);
+  // Collapsed state mirrors the right-rail panels: the panel shrinks to just its
+  // header (label, version, coverage) so the board has more room. Defaults open.
+  const [open, setOpen] = useState(true);
+  // Memoize: skill re-renders on every SSE event; re-creating this Set each time
+  // is wasteful since covered changes only when the planner rewrites the skill.
+  const covered = useMemo(() => new Set(skill.covered), [skill.covered]);
   // The tile set (order) and group noun (unit) are STATIC per task, sourced keyed
   // on the active task so they always match it (the live skill.order can race a run
   // or a remount). Coverage, failing, version, and accuracy still come from the
@@ -73,37 +79,50 @@ export function PlannerSkillPanel({
           }
         }}
         title="Open the planner skill: read it and step through every version"
-        className="pointer-events-auto cursor-pointer rounded-2xl border border-violet-500/30 bg-slate-950/75 p-3 backdrop-blur transition hover:border-violet-400/60 hover:bg-slate-900/75"
+        className="pointer-events-auto cursor-pointer rounded-lg border border-line bg-panel/75 p-3 backdrop-blur transition hover:border-line hover:bg-raised/75"
       >
-      <div className="mb-2 flex items-center justify-between gap-3">
+      <div className={`flex items-center justify-between gap-3 ${open ? "mb-2" : ""}`}>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-medium uppercase tracking-[0.18em] text-violet-300/90">
+          {/* Stop propagation so toggling collapse does not also open the drawer. */}
+          <span
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <CollapseButton
+              open={open}
+              onClick={() => setOpen((o) => !o)}
+              label="planner skill"
+            />
+          </span>
+          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-ink-mid">
             planner skill
           </span>
-          <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[9px] tabular-nums text-violet-200">
+          <span className="rounded-full border border-line bg-white/[0.04] px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-ink-mid">
             v{skill.version}
           </span>
         </div>
-        <span className="text-[10px] tabular-nums text-slate-500">
+        <span className="text-[10px] tabular-nums text-ink-dim">
           {covered.size}/{total} covered
           {skill.accuracy !== null
             ? ` · ${(skill.accuracy * 100).toFixed(0)}%`
             : ""}
-          <span className="ml-2 text-violet-300/70">read →</span>
+          <span className="ml-2 text-ink-mid/70">read →</span>
         </span>
       </div>
 
+      {open && (
+      <>
       <div className="flex items-stretch gap-1.5">
         {discovering &&
           [0, 1, 2, 3].map((i) => (
             <div
               key={`skeleton-${i}`}
-              className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-amber-500/20 bg-amber-500/5 px-1 py-2"
+              className="flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border border-accent-bright/20 bg-accent-bright/5 px-1 py-2"
               style={{ animation: "gb-pulse 1.4s ease-in-out infinite", animationDelay: `${i * 120}ms` }}
             >
-              <span className="h-2 w-2 rounded-full bg-amber-400/50" />
-              <span className="text-[9px] leading-none text-amber-300/50">...</span>
-              <span className="text-[8px] leading-none text-slate-700">-</span>
+              <span className="h-2 w-2 rounded-full bg-accent-bright/50" />
+              <span className="text-[9px] leading-none text-accent-bright/50">...</span>
+              <span className="text-[8px] leading-none text-ink-faint">-</span>
             </div>
           ))}
         {!discovering &&
@@ -123,8 +142,8 @@ export function PlannerSkillPanel({
                 isCovered
                   ? "border-transparent"
                   : isGap
-                    ? "border-rose-500/70"
-                    : "border-slate-800/70"
+                    ? "border-fail/70"
+                    : "border-line"
               }`}
               style={
                 isCovered
@@ -139,7 +158,7 @@ export function PlannerSkillPanel({
               <span
                 className="h-2 w-2 rounded-full"
                 style={{
-                  background: isCovered || isGap ? color : "#334155",
+                  background: isCovered || isGap ? color : "#26262a",
                   boxShadow: isCovered ? `0 0 6px ${color}` : undefined,
                   animation: isGap
                     ? "gb-pulse 1.1s ease-in-out infinite"
@@ -151,10 +170,10 @@ export function PlannerSkillPanel({
               <span
                 className={`text-[9px] leading-none ${
                   isCovered
-                    ? "text-slate-200"
+                    ? "text-ink"
                     : isGap
-                      ? "text-rose-300"
-                      : "text-slate-500"
+                      ? "text-fail"
+                      : "text-ink-dim"
                 }`}
               >
                 {groupLabel(cat)}
@@ -162,10 +181,10 @@ export function PlannerSkillPanel({
               <span
                 className={`text-[8px] leading-none tabular-nums ${
                   isCovered
-                    ? "text-emerald-400/70"
+                    ? "text-pass/70"
                     : failed
-                      ? "text-rose-400/80"
-                      : "text-slate-700"
+                      ? "text-fail/80"
+                      : "text-ink-faint"
                 }`}
               >
                 {isCovered ? "pass" : failed ? `${failed} fail` : "-"}
@@ -175,9 +194,11 @@ export function PlannerSkillPanel({
         })}
       </div>
 
-      <div className="mt-2 truncate text-[11px] text-slate-400">
-        <span className="text-violet-300/80">improver</span> {narration}
+      <div className="mt-2 truncate text-[11px] text-ink-mid">
+        <span className="text-ink-mid/80">improver</span> {narration}
       </div>
+      </>
+      )}
     </div>
 
       <SkillViewerDrawer

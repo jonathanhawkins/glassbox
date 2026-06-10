@@ -1,5 +1,3 @@
-"use client";
-
 // The Glassbox pitch deck content (WeaveHacks 4, 3-minute live pitch).
 //
 // Each slide is a typed { id, title, accent, render } record. `title` feeds the
@@ -11,7 +9,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { CAP_COLORS } from "@/lib/cockpit/types";
-import { DeckCurve } from "./DeckCurve";
+import { DeckCurve } from "./DeckCurveLazy";
 import { SponsorStrip } from "./SponsorLogos";
 import {
   ACCENTS,
@@ -63,12 +61,12 @@ function AgentNode({
   const a = ACCENTS[accent];
   return (
     <div
-      className={`flex flex-col gap-0.5 rounded-xl border ${a.border} bg-slate-950/70 px-4 py-3 backdrop-blur`}
+      className={`flex flex-col gap-0.5 rounded-xl border ${a.border} bg-panel/70 px-4 py-3 backdrop-blur`}
     >
       <span className={`font-mono text-base font-semibold ${a.text}`}>
         {name}
       </span>
-      <span className="font-mono text-xs tracking-wide text-slate-500">
+      <span className="font-mono text-xs tracking-wide text-ink-dim">
         {role}
       </span>
     </div>
@@ -77,7 +75,7 @@ function AgentNode({
 
 /** A thin connector arrow between pipeline stages. */
 function Flow() {
-  return <span className="font-mono text-lg text-slate-600">{"->"}</span>;
+  return <span className="font-mono text-lg text-ink-dim">{"->"}</span>;
 }
 
 // The real gpt2 tokenization of one corpus-style sentence, used to demystify
@@ -120,10 +118,10 @@ function TokenChip({
       <div
         className={`rounded-lg border ${a.border} ${a.bg} px-2.5 py-1.5 font-mono text-lg ${a.text}`}
       >
-        {lead && <span className="text-slate-600">{"␣"}</span>}
+        {lead && <span className="text-ink-dim">{"␣"}</span>}
         <span className="whitespace-pre">{body}</span>
       </div>
-      <span className="font-mono text-xs tabular-nums text-slate-500">{id}</span>
+      <span className="font-mono text-xs tabular-nums text-ink-dim">{id}</span>
     </div>
   );
 }
@@ -138,7 +136,7 @@ function Point({
 }) {
   const a = ACCENTS[accent];
   return (
-    <li className="flex items-start gap-3 text-lg leading-relaxed text-slate-300">
+    <li className="flex items-start gap-3 text-lg leading-relaxed text-ink-mid">
       <span className={`mt-2.5 h-1.5 w-1.5 shrink-0 rounded-full ${a.dot}`} />
       <span>{children}</span>
     </li>
@@ -170,7 +168,7 @@ function JudgeCard({
           {title}
         </span>
       </div>
-      <p className="text-base leading-relaxed text-slate-300">{body}</p>
+      <p className="text-base leading-relaxed text-ink-mid">{body}</p>
     </Panel>
   );
 }
@@ -186,19 +184,19 @@ export const SLIDES: Slide[] = [
     render: () => (
       <SlideShell accent="cyan">
         <div className="flex flex-col items-start">
-          <div className="mb-6 inline-flex items-center gap-2.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 font-mono text-sm text-emerald-300">
+          <div className="mb-6 inline-flex items-center gap-2.5 rounded-full border border-pass/40 bg-pass/10 px-3 py-1 font-mono text-sm text-pass">
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pass opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-pass" />
             </span>
             live . WeaveHacks 4
           </div>
 
-          <h1 className="text-[6.5rem] font-semibold leading-none tracking-tight text-slate-50">
+          <h1 className="text-[6.5rem] font-semibold leading-none tracking-tight text-ink">
             Glassbox
           </h1>
 
-          <p className="mt-7 max-w-4xl text-balance text-2xl leading-snug text-slate-200">
+          <p className="mt-7 max-w-4xl text-balance text-2xl leading-snug text-ink">
             Agent swarms are black boxes. Glassbox is the glass cockpit that lets
             you watch a self-improving swarm build real code, graded live against
             ground truth.
@@ -227,8 +225,8 @@ export const SLIDES: Slide[] = [
 
           <SponsorStrip align="left" className="mt-10" />
 
-          <p className="mt-8 font-mono text-sm tracking-wide text-slate-500">
-            press <span className="text-cyan-300">{"->"}</span> to advance
+          <p className="mt-8 font-mono text-sm tracking-wide text-ink-dim">
+            press <span className="text-accent">{"->"}</span> to advance
           </p>
         </div>
       </SlideShell>
@@ -243,7 +241,7 @@ export const SLIDES: Slide[] = [
     render: () => (
       <SlideShell accent="rose">
         <Eyebrow accent="rose">the problem</Eyebrow>
-        <Title>Orchestration today hides the answers judges care about.</Title>
+        <Title>Orchestration today hides the answers that matter.</Title>
         <div className="mt-8 grid gap-8 md:grid-cols-[1.1fr_1fr] md:items-center">
           <Lede>
             You spin up a swarm and stare at scrolling logs. The hard questions
@@ -257,26 +255,26 @@ export const SLIDES: Slide[] = [
               {Array.from({ length: 9 }).map((_, i) => (
                 <div
                   key={i}
-                  className="space-y-1 rounded-md border border-slate-800/80 bg-black/40 p-2"
+                  className="space-y-1 rounded-md border border-line bg-canvas/40 p-2"
                 >
                   {Array.from({ length: 4 }).map((__, j) => (
                     <div
                       key={j}
-                      className="h-1 rounded-full bg-slate-700/60"
+                      className="h-1 rounded-full bg-ink-faint/60"
                       style={{ width: `${40 + ((i * 7 + j * 11) % 55)}%` }}
                     />
                   ))}
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-center font-mono text-xs tracking-wide text-rose-300/80">
+            <p className="mt-3 text-center font-mono text-xs tracking-wide text-fail/80">
               no signal . no ground truth . no idea if it is working
             </p>
           </Panel>
         </div>
         <Takeaway accent="rose">
           Glassbox turns the hidden orchestration loop into a visible, measured
-          system judges can inspect in three minutes.
+          system you can inspect in three minutes.
         </Takeaway>
       </SlideShell>
     ),
@@ -296,32 +294,32 @@ export const SLIDES: Slide[] = [
         </Title>
         <div className="mt-10 grid gap-5 md:grid-cols-2">
           <Panel accent="violet" className="p-6">
-            <div className="mb-2 font-mono text-sm uppercase tracking-[0.18em] text-violet-300/80">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.18em] text-ink-mid/80">
               the product
             </div>
-            <p className="text-xl leading-relaxed text-slate-300">
-              <span className="text-violet-300">Glassbox</span> is a general
+            <p className="text-xl leading-relaxed text-ink-mid">
+              <span className="text-ink-mid">Glassbox</span> is a general
               self-improvement harness. The demo shows the complete loop:
               decompose work, run workers, grade truth, rewrite the planner.
             </p>
           </Panel>
           <Panel accent="cyan" className="p-6">
-            <div className="mb-2 font-mono text-sm uppercase tracking-[0.18em] text-cyan-300/80">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.18em] text-accent/80">
               the target (just the proof)
             </div>
-            <p className="text-xl leading-relaxed text-slate-300">
+            <p className="text-xl leading-relaxed text-ink-mid">
               A tokenizer. Not the point, the proof. We picked it for{" "}
-              <span className="text-cyan-300">ground truth</span>: an exact,
+              <span className="text-accent">ground truth</span>: an exact,
               un-gameable token-ID diff a swarm cannot bluff.
             </p>
           </Panel>
         </div>
-        <p className="mt-8 text-pretty text-xl leading-relaxed text-slate-300">
+        <p className="mt-8 text-pretty text-xl leading-relaxed text-ink-mid">
           Glassbox is{" "}
-          <span className="text-slate-100">not a tokenizer tool</span>. It is the
+          <span className="text-ink">not a tokenizer tool</span>. It is the
           orchestration cockpit and evaluator loop, pointed at a target small
           enough to finish and prove in a weekend, then{" "}
-          <span className="text-amber-300">at any repo you hand it</span> (more on
+          <span className="text-accent-bright">at any repo you hand it</span> (more on
           that later).
         </p>
         <Takeaway accent="cyan">
@@ -348,10 +346,10 @@ export const SLIDES: Slide[] = [
         </Lede>
 
         <Panel accent="cyan" className="mt-6 p-6">
-          <div className="mb-3 text-center font-mono text-xl text-slate-100">
+          <div className="mb-3 text-center font-mono text-xl text-ink">
             She said, &quot;It&apos;s a beautiful day, isn&apos;t it?&quot;
           </div>
-          <div className="mb-4 text-center font-mono text-[11px] uppercase tracking-[0.2em] text-cyan-300/70">
+          <div className="mb-4 text-center font-mono text-[11px] uppercase tracking-[0.2em] text-accent/70">
             gpt2 byte-pair encoding {"->"}
           </div>
           <div className="flex flex-wrap items-start justify-center gap-2.5">
@@ -359,7 +357,7 @@ export const SLIDES: Slide[] = [
               <TokenChip key={i} t={tok.t} id={tok.id} punct={tok.punct} />
             ))}
           </div>
-          <p className="mt-4 text-center text-sm text-slate-400">
+          <p className="mt-4 text-center text-sm text-ink-mid">
             The space rides with the word, <Mono accent="violet">&apos;t</Mono> and{" "}
             <Mono accent="violet">?&quot;</Mono> are their own tokens. One wrong ID
             fails the line.
@@ -375,7 +373,7 @@ export const SLIDES: Slide[] = [
             {CATEGORIES.map(({ cap, label }) => (
               <span
                 key={cap}
-                className="flex items-center gap-2 rounded-lg border border-slate-800/80 bg-slate-900/40 px-2.5 py-1.5"
+                className="flex items-center gap-2 rounded-lg border border-line bg-raised/40 px-2.5 py-1.5"
               >
                 <span
                   className="h-2 w-2 shrink-0 rounded-full"
@@ -384,7 +382,7 @@ export const SLIDES: Slide[] = [
                     boxShadow: `0 0 8px ${CAP_COLORS[cap]}`,
                   }}
                 />
-                <span className="font-mono text-sm text-slate-200">{label}</span>
+                <span className="font-mono text-sm text-ink">{label}</span>
               </span>
             ))}
           </div>
@@ -429,20 +427,20 @@ export const SLIDES: Slide[] = [
 
           <div className="grid gap-4 md:grid-cols-2">
             <Panel className="p-5">
-              <div className="mb-1 font-mono text-sm uppercase tracking-[0.18em] text-slate-400">
+              <div className="mb-1 font-mono text-sm uppercase tracking-[0.18em] text-ink-mid">
                 <Mono accent="violet">handoffs</Mono> + <Mono accent="cyan">Beads</Mono>
               </div>
-              <p className="text-lg leading-relaxed text-slate-300">
+              <p className="text-lg leading-relaxed text-ink-mid">
                 The cockpit shows every handoff as an Agent Mail style thread.
                 Work lives in Beads, the <Mono>br</Mono> dependency-aware issue
                 graph.
               </p>
             </Panel>
             <Panel className="p-5">
-              <div className="mb-1 font-mono text-sm uppercase tracking-[0.18em] text-slate-400">
+              <div className="mb-1 font-mono text-sm uppercase tracking-[0.18em] text-ink-mid">
                 dependency-aware
               </div>
-              <p className="text-lg leading-relaxed text-slate-300">
+              <p className="text-lg leading-relaxed text-ink-mid">
                 The planner builds 8 beads with real edges. One foundational
                 bead unblocks six parallel workers, then the harness bead closes
                 it out.
@@ -486,25 +484,25 @@ export const SLIDES: Slide[] = [
           </ul>
 
           <Panel accent="amber" className="p-6">
-            <div className="mb-3 font-mono text-sm uppercase tracking-[0.18em] text-slate-400">
+            <div className="mb-3 font-mono text-sm uppercase tracking-[0.18em] text-ink-mid">
               nested trace
             </div>
             <div className="space-y-1.5 font-mono text-base">
               {[
-                { d: 0, t: "run_loop", c: "text-amber-300" },
-                { d: 1, t: "planner.decompose", c: "text-violet-300" },
-                { d: 1, t: "coordinator.route", c: "text-cyan-300" },
-                { d: 2, t: "worker.implement x4", c: "text-slate-300" },
-                { d: 1, t: "validator.oracle_diff", c: "text-emerald-300" },
-                { d: 2, t: "score: accuracy, pass@1", c: "text-emerald-300" },
-                { d: 1, t: "improver.rewrite_skill", c: "text-rose-300" },
+                { d: 0, t: "run_loop", c: "text-accent-bright" },
+                { d: 1, t: "planner.decompose", c: "text-ink-mid" },
+                { d: 1, t: "coordinator.route", c: "text-accent" },
+                { d: 2, t: "worker.implement x4", c: "text-ink-mid" },
+                { d: 1, t: "validator.oracle_diff", c: "text-pass" },
+                { d: 2, t: "score: accuracy, pass@1", c: "text-pass" },
+                { d: 1, t: "improver.rewrite_skill", c: "text-accent" },
               ].map((row, i) => (
                 <div
                   key={i}
                   className="flex items-center gap-2"
                   style={{ paddingLeft: `${row.d * 1.4}rem` }}
                 >
-                  <span className="text-slate-600">{row.d === 0 ? "+" : "|-"}</span>
+                  <span className="text-ink-dim">{row.d === 0 ? "+" : "|-"}</span>
                   <span className={row.c}>{row.t}</span>
                 </div>
               ))}
@@ -512,9 +510,9 @@ export const SLIDES: Slide[] = [
           </Panel>
         </div>
 
-        <p className="mt-7 text-pretty text-xl leading-relaxed text-slate-300">
+        <p className="mt-7 text-pretty text-xl leading-relaxed text-ink-mid">
           With a hard oracle underneath, Weave tells us{" "}
-          <span className="text-amber-300">which sub-agent moved correctness</span>{" "}
+          <span className="text-accent-bright">which sub-agent moved correctness</span>{" "}
           and whether a plan passed cleanly or thrashed.
         </p>
         <Takeaway accent="amber">
@@ -546,12 +544,12 @@ export const SLIDES: Slide[] = [
             <ul className="flex flex-col gap-3">
               <Point accent="cyan">
                 The skill materially grows{" "}
-                <span className="text-cyan-300">v1 to v7</span>, snapshotted in{" "}
+                <span className="text-accent">v1 to v7</span>, snapshotted in{" "}
                 <Mono>agents/planner/history/</Mono>.
               </Point>
               <Point accent="cyan">
                 Each version adds one category, so accuracy steps{" "}
-                <span className="text-cyan-300">+1/7</span> every time. Honest,
+                <span className="text-accent">+1/7</span> every time. Honest,
                 not staged.
               </Point>
             </ul>
@@ -588,16 +586,16 @@ export const SLIDES: Slide[] = [
           The tokenizer proves the loop. To prove it is not a tokenizer tool, you
           hand the same swarm a real repo and a test command. It discovers what is
           broken, fixes it with the LLM, and grades itself against{" "}
-          <span className="text-amber-300">your</span> suite, with no deterministic
+          <span className="text-accent-bright">your</span> suite, with no deterministic
           safety net.
         </Lede>
 
         <div className="mt-9 grid gap-4 md:grid-cols-3">
           <Panel accent="amber" className="p-6">
-            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-amber-300/80">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-accent-bright/80">
               1 . discover
             </div>
-            <p className="text-lg leading-relaxed text-slate-300">
+            <p className="text-lg leading-relaxed text-ink-mid">
               Run the suite once. The failing test modules become the scoring
               groups, live.
             </p>
@@ -607,22 +605,22 @@ export const SLIDES: Slide[] = [
             </div>
           </Panel>
           <Panel accent="violet" className="p-6">
-            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-violet-300/80">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-ink-mid/80">
               2 . fix
             </div>
-            <p className="text-lg leading-relaxed text-slate-300">
+            <p className="text-lg leading-relaxed text-ink-mid">
               Workers author real edits with the LLM. An edit is kept only if it{" "}
-              <span className="text-violet-300">strictly raises the score</span>.
+              <span className="text-ink-mid">strictly raises the score</span>.
               No fallback, so a bead that does not help bounces.
             </p>
           </Panel>
           <Panel accent="emerald" className="p-6">
-            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-emerald-300/80">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-pass/80">
               3 . green
             </div>
-            <p className="text-lg leading-relaxed text-slate-300">
+            <p className="text-lg leading-relaxed text-ink-mid">
               The real pytest pass-rate climbs. Workers edit a disposable sandbox,
-              so the source repo is <span className="text-emerald-300">never
+              so the source repo is <span className="text-pass">never
               mutated</span>, and test files are read-only.
             </p>
           </Panel>
@@ -654,28 +652,28 @@ export const SLIDES: Slide[] = [
 
         <div className="mt-8 grid gap-5 md:grid-cols-3">
           <Panel accent="cyan" className="p-6">
-            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-cyan-300/80">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-accent/80">
               tldraw board
             </div>
-            <p className="text-lg leading-relaxed text-slate-300">
+            <p className="text-lg leading-relaxed text-ink-mid">
               8 agent lanes and capability-colored bead nodes animate backlog to
               worker to validator over SSE.
             </p>
           </Panel>
           <Panel accent="emerald" className="p-6">
-            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-emerald-300/80">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-pass/80">
               command bar
             </div>
-            <p className="text-lg leading-relaxed text-slate-300">
+            <p className="text-lg leading-relaxed text-ink-mid">
               A CopilotKit chat with generative-UI charts rendered inside the
               thread. Launch the whole run by typing the goal.
             </p>
           </Panel>
           <Panel accent="violet" className="p-6">
-            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-violet-300/80">
+            <div className="mb-2 font-mono text-sm uppercase tracking-[0.16em] text-ink-mid/80">
               live curve
             </div>
-            <p className="text-lg leading-relaxed text-slate-300">
+            <p className="text-lg leading-relaxed text-ink-mid">
               A recharts correctness curve climbing in real time, fed by the
               Redis leaderboard.
             </p>
@@ -684,7 +682,7 @@ export const SLIDES: Slide[] = [
 
         {/* The live "spot a gap, inject a bead" beat, folded in as a cockpit cue. */}
         <Panel accent="violet" className="mt-6 flex flex-wrap items-center justify-between gap-5 px-6 py-5">
-          <p className="max-w-md text-pretty text-lg leading-relaxed text-slate-300">
+          <p className="max-w-md text-pretty text-lg leading-relaxed text-ink-mid">
             Mid-run the swarm spots a missing capability and injects a real bead
             into the <Mono>br</Mono> graph live. The oracle accuracy jumps in front
             of you.
@@ -700,12 +698,12 @@ export const SLIDES: Slide[] = [
                   <div className={`text-3xl font-bold tabular-nums ${ACCENTS[s.accent].text}`}>
                     {s.v}
                   </div>
-                  <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-dim">
                     {s.label}
                   </div>
                 </div>
                 {i < arr.length - 1 && (
-                  <span className="font-mono text-xl text-slate-600">{"->"}</span>
+                  <span className="font-mono text-xl text-ink-dim">{"->"}</span>
                 )}
               </div>
             ))}
@@ -732,25 +730,25 @@ export const SLIDES: Slide[] = [
         <SponsorStrip
           label="powered by"
           align="left"
-          className="mt-8 border-y border-slate-800/70 py-6"
+          className="mt-8 border-y border-line py-6"
         />
 
         <div className="mt-9 grid gap-5 md:grid-cols-3">
           <Panel accent="cyan" className="flex flex-col gap-3 p-6">
-            <div className="font-mono text-2xl font-semibold text-cyan-300">
+            <div className="font-mono text-2xl font-semibold text-accent">
               Weave
             </div>
-            <p className="text-base leading-relaxed text-slate-300">
+            <p className="text-base leading-relaxed text-ink-mid">
               Tracing for the planner, workers, validator, improver, and LLM
               calls. The improver consumes the Weave-traced oracle gaps to
               rewrite the skill.
             </p>
           </Panel>
           <Panel accent="rose" className="flex flex-col gap-3 p-6">
-            <div className="font-mono text-2xl font-semibold text-rose-300">
+            <div className="font-mono text-2xl font-semibold text-fail">
               Redis
             </div>
-            <p className="text-base leading-relaxed text-slate-300">
+            <p className="text-base leading-relaxed text-ink-mid">
               The live bus, not just storage. A Stream (
               <Mono>glassbox:events</Mono>) fans every agent event to the tldraw
               board over SSE, a sorted set per task (
@@ -759,10 +757,10 @@ export const SLIDES: Slide[] = [
             </p>
           </Panel>
           <Panel accent="emerald" className="flex flex-col gap-3 p-6">
-            <div className="font-mono text-2xl font-semibold text-emerald-300">
+            <div className="font-mono text-2xl font-semibold text-pass">
               CopilotKit
             </div>
-            <p className="text-base leading-relaxed text-slate-300">
+            <p className="text-base leading-relaxed text-ink-mid">
               The command bar over AG-UI. Four frontend tools (launch, climb,
               live, propose) let the operator start a run by typing, a
               human-in-the-loop approval card gates the climb, and the curve and
@@ -774,35 +772,35 @@ export const SLIDES: Slide[] = [
         {/* The rest of the load-bearing stack, named so judges see every piece. */}
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <Panel accent="violet" className="p-5">
-            <div className="font-mono text-lg font-semibold text-violet-300">
+            <div className="font-mono text-lg font-semibold text-ink-mid">
               Agent Mail
             </div>
-            <p className="mt-1 text-sm leading-relaxed text-slate-400">
+            <p className="mt-1 text-sm leading-relaxed text-ink-mid">
               Agent-to-agent messages and advisory file leases. Every handoff
               shows up as a thread in the cockpit drawer.
             </p>
           </Panel>
           <Panel accent="violet" className="p-5">
-            <div className="font-mono text-lg font-semibold text-violet-300">
+            <div className="font-mono text-lg font-semibold text-ink-mid">
               Beads (br)
             </div>
-            <p className="mt-1 text-sm leading-relaxed text-slate-400">
+            <p className="mt-1 text-sm leading-relaxed text-ink-mid">
               The dependency-aware issue graph. The planner writes it, the
               coordinator routes <Mono>br ready</Mono> beads to workers.
             </p>
           </Panel>
           <Panel accent="amber" className="p-5">
-            <div className="font-mono text-lg font-semibold text-amber-300">
+            <div className="font-mono text-lg font-semibold text-accent-bright">
               tldraw
             </div>
-            <p className="mt-1 text-sm leading-relaxed text-slate-400">
+            <p className="mt-1 text-sm leading-relaxed text-ink-mid">
               The programmatic canvas: agent lanes and capability-colored beads,
               animated entirely from the Redis event stream.
             </p>
           </Panel>
         </div>
 
-        <p className="mt-7 text-pretty text-lg text-slate-400">
+        <p className="mt-7 text-pretty text-lg text-ink-mid">
           Swarm on W&B Inference (<Mono>openai/gpt-oss-120b</Mono>), chat on{" "}
           <Mono>meta-llama/Llama-3.3-70B-Instruct</Mono>. Weave auto-traces both.
         </p>
@@ -840,7 +838,7 @@ export const SLIDES: Slide[] = [
           </ul>
 
           <Panel className="p-6">
-            <div className="mb-3 font-mono text-sm uppercase tracking-[0.18em] text-slate-400">
+            <div className="mb-3 font-mono text-sm uppercase tracking-[0.18em] text-ink-mid">
               third-party deps (not ours)
             </div>
             <div className="flex flex-wrap gap-2.5">
@@ -870,26 +868,26 @@ export const SLIDES: Slide[] = [
       <SlideShell accent="cyan">
         <div className="flex flex-col items-start">
           <Eyebrow accent="cyan">glassbox</Eyebrow>
-          <h2 className="text-balance text-6xl font-semibold leading-[1.05] tracking-tight text-slate-50">
+          <h2 className="text-balance text-6xl font-semibold leading-[1.05] tracking-tight text-ink">
             Orchestration you can see,{" "}
-            <span className="text-cyan-300">graded against truth</span>, that{" "}
-            <span className="text-violet-300">improves itself.</span>
+            <span className="text-accent">graded against truth</span>, that{" "}
+            <span className="text-accent">improves itself.</span>
           </h2>
 
           <div className="relative z-40 mt-12 grid w-full gap-4 md:grid-cols-2">
             <Link
               href="/"
-              className="group flex items-center justify-between rounded-2xl border border-cyan-500/40 bg-cyan-500/10 px-6 py-5 transition hover:bg-cyan-500/20"
+              className="group flex items-center justify-between rounded-2xl border border-accent/40 bg-accent/10 px-6 py-5 transition hover:bg-accent/20"
             >
               <div>
-                <div className="font-mono text-sm uppercase tracking-[0.18em] text-cyan-300/80">
+                <div className="font-mono text-sm uppercase tracking-[0.18em] text-accent/80">
                   live demo
                 </div>
-                <div className="mt-1 text-2xl font-semibold text-slate-50">
+                <div className="mt-1 text-2xl font-semibold text-ink">
                   Open the cockpit
                 </div>
               </div>
-              <span className="font-mono text-3xl text-cyan-300 transition group-hover:translate-x-1">
+              <span className="font-mono text-3xl text-accent transition group-hover:translate-x-1">
                 {"->"}
               </span>
             </Link>
@@ -898,17 +896,17 @@ export const SLIDES: Slide[] = [
               href={WEAVE_LINK}
               target="_blank"
               rel="noreferrer"
-              className="group flex items-center justify-between rounded-2xl border border-amber-500/40 bg-amber-500/10 px-6 py-5 transition hover:bg-amber-500/20"
+              className="group flex items-center justify-between rounded-2xl border border-line bg-white/[0.04] px-6 py-5 transition hover:bg-raised"
             >
               <div>
-                <div className="font-mono text-sm uppercase tracking-[0.18em] text-amber-300/80">
+                <div className="font-mono text-sm uppercase tracking-[0.18em] text-ink-mid">
                   w&b weave project
                 </div>
-                <div className="mt-1 break-all font-mono text-base text-slate-200">
+                <div className="mt-1 break-all font-mono text-base text-ink-mid">
                   wandb.ai/whitely-white-elk-llc/glassbox/weave
                 </div>
               </div>
-              <span className="ml-4 font-mono text-3xl text-amber-300 transition group-hover:translate-x-1">
+              <span className="ml-4 font-mono text-3xl text-ink-mid transition group-hover:translate-x-1">
                 {"->"}
               </span>
             </a>
@@ -916,8 +914,8 @@ export const SLIDES: Slide[] = [
 
           <SponsorStrip align="left" className="mt-12" />
 
-          <p className="mt-8 font-mono text-sm tracking-wide text-slate-500">
-            handoff to the live board at <span className="text-cyan-300">/</span>
+          <p className="mt-8 font-mono text-sm tracking-wide text-ink-dim">
+            handoff to the live board at <span className="text-accent">/</span>
           </p>
         </div>
       </SlideShell>

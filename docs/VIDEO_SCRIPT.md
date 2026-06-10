@@ -72,7 +72,7 @@ latest, or the skill viewer).
 **On screen:** back to the full cockpit, or you on camera.
 **Say:**
 > Orchestration you can see, graded against truth, that improves itself. Built this
-> weekend, and it plugs into a larger Godot to Rust port. That's Glassbox.
+> weekend, That's Glassbox.
 
 ## Optional generality beat (swap in, do not add)
 

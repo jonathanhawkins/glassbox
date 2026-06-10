@@ -22,7 +22,7 @@ export function Legend({ activeTask }: { activeTask: TaskName }) {
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <CollapseButton open={open} onClick={() => setOpen((o) => !o)} label="legend" />
-        <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400">
+        <span className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-dim">
           legend
         </span>
       </div>
@@ -30,7 +30,7 @@ export function Legend({ activeTask }: { activeTask: TaskName }) {
         (order.length === 0 ? (
           // BYO task still discovering its groups (or a backend outage): show a
           // muted placeholder instead of an empty, invisible legend.
-          <span className="text-[10px] tracking-wide text-slate-500">
+          <span className="font-mono text-[10px] tracking-wide text-ink-dim">
             groups appear after the first eval
           </span>
         ) : (
@@ -43,7 +43,7 @@ export function Legend({ activeTask }: { activeTask: TaskName }) {
                     className="inline-block h-2.5 w-2.5 rounded-full"
                     style={{ background: color, boxShadow: `0 0 6px ${color}` }}
                   />
-                  <span className="text-[10px] tracking-wide text-slate-400">
+                  <span className="font-mono text-[10px] tracking-wide text-ink-mid">
                     {groupLabel(group)}
                   </span>
                 </span>

@@ -84,81 +84,81 @@ export function NewTaskDialog({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-slate-950/95 p-5 shadow-2xl"
+        className="w-full max-w-md rounded-lg border border-accent/30 bg-panel/95 p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-amber-200">Bring your own repo</h2>
+          <h2 className="text-sm font-semibold text-accent-bright">Bring your own repo</h2>
           <button
             onClick={onClose}
-            className="rounded px-2 text-slate-500 hover:text-slate-200"
+            className="rounded px-2 text-ink-dim hover:text-ink"
             aria-label="close"
           >
              esc
           </button>
         </div>
-        <p className="mb-4 text-[11px] leading-relaxed text-slate-400">
+        <p className="mb-4 text-[11px] leading-relaxed text-ink-mid">
           Point the swarm at a real repo and watch it make the failing tests pass.
           No deterministic safety net: the score is whatever the swarm actually
           achieves against your suite.
         </p>
 
         <label className="mb-3 block">
-          <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">repo (path or git URL)</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim">repo (path or git URL)</span>
           <input
             value={repo}
             onChange={(e) => setRepo(e.target.value)}
             spellCheck={false}
             placeholder="demo  (or github.com/owner/name)"
-            className="mt-1 w-full rounded-lg border border-slate-700/70 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-amber-500/60"
+            className="mt-1 w-full rounded-lg border border-line bg-raised/70 px-3 py-1.5 text-xs text-ink outline-none focus:border-accent/60"
           />
         </label>
 
         <div className="mb-3 flex gap-2">
           <label className="flex-1">
-            <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">test command</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim">test command</span>
             <input
               value={testCmd}
               onChange={(e) => setTestCmd(e.target.value)}
               spellCheck={false}
-              className="mt-1 w-full rounded-lg border border-slate-700/70 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-amber-500/60"
+              className="mt-1 w-full rounded-lg border border-line bg-raised/70 px-3 py-1.5 text-xs text-ink outline-none focus:border-accent/60"
             />
           </label>
           <label className="flex-1">
-            <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">editable glob</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim">editable glob</span>
             <input
               value={editable}
               onChange={(e) => setEditable(e.target.value)}
               spellCheck={false}
-              className="mt-1 w-full rounded-lg border border-slate-700/70 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-amber-500/60"
+              className="mt-1 w-full rounded-lg border border-line bg-raised/70 px-3 py-1.5 text-xs text-ink outline-none focus:border-accent/60"
             />
           </label>
         </div>
 
         <label className="mb-4 block">
-          <span className="text-[10px] uppercase tracking-[0.18em] text-slate-500">goal</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-dim">goal</span>
           <input
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             spellCheck={false}
-            className="mt-1 w-full rounded-lg border border-slate-700/70 bg-slate-900/70 px-3 py-1.5 text-xs text-slate-200 outline-none focus:border-amber-500/60"
+            className="mt-1 w-full rounded-lg border border-line bg-raised/70 px-3 py-1.5 text-xs text-ink outline-none focus:border-accent/60"
           />
         </label>
 
-        {error && <p className="mb-3 text-[11px] text-rose-400">{error}</p>}
+        {error && <p className="mb-3 text-[11px] text-fail">{error}</p>}
 
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
             disabled={busy}
-            className="rounded-lg border border-slate-700/60 bg-slate-900/50 px-3 py-1.5 text-[11px] font-medium text-slate-400 hover:text-slate-200 disabled:opacity-50"
+            className="rounded-lg border border-line bg-raised/50 px-3 py-1.5 text-[11px] font-medium text-ink-mid hover:text-ink disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={submit}
             disabled={busy || !repo.trim()}
-            className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+            className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-accent hover:bg-accent/20 disabled:opacity-50"
           >
             {busy ? "Cloning + discovering..." : "Create + discover"}
           </button>

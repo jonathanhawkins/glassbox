@@ -27,7 +27,7 @@ EVENT_TYPES: set[str] = set(_CONTRACT["eventTypes"])
 AGENT_STATUS: list[str] = _CONTRACT["agentStatus"]
 AGENTS: list[str] = _CONTRACT["agents"]
 
-DEFAULT_TASK = "tokenizer"
+DEFAULT_TASK = "perf_takehome"
 
 
 def planner_scores_key(task: str = DEFAULT_TASK) -> str:

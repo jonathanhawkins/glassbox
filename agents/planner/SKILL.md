@@ -54,12 +54,6 @@ adding one category at a time, to evolve the plan.
 
 <!-- coverage:start -->
 ascii
-punctuation
-numbers
-code
-unicode
-whitespace
-emoji
 <!-- coverage:end -->
 
 ## How the curve works (read this first)
@@ -135,15 +129,3 @@ block, and never invent a category outside the allowed set.
 - v1 (baseline): the eight functional components plus the foundational `ascii`
   class. Intentionally incomplete so the eval fails the other six scoring
   categories and the improver has room to climb.
-
-## Revision v2: The planner's punctuation handling is being improved with a new bead to address the high failure rate. This change aims to increase overall accuracy. (2026-06-07)
-
-## Revision v3: The planner skill is being updated to improve accuracy, particularly with numbers. A new bead is being added to address the 31 failing checks in the numbers category. (2026-06-07)
-
-## Revision v4: The planner skill is being updated to include a new bead for unicode to address the significant gap in accuracy. This addition aims to improve the overall accuracy score. (2026-06-07)
-
-## Revision v5: The planner skill is being updated to improve accuracy by addressing whitespace handling. A new bead is being added to cover whitespace. (2026-06-07)
-
-## Revision v6: code inputs already tokenize correctly (this class is delivered by a branch an earlier category added), so this bead lists code to complete coverage of every scoring category with accuracy already at 1.0. (2026-06-07)
-
-## Revision v7: emoji inputs already tokenize correctly (this class is delivered by a branch an earlier category added), so this bead lists emoji to complete coverage of every scoring category with accuracy already at 1.0. (2026-06-07)

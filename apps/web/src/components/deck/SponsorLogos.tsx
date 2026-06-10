@@ -1,5 +1,3 @@
-"use client";
-
 // Official sponsor logos for the Glassbox deck, inlined as SVG.
 //
 // Inlined (not <img> to /public) on purpose: the deck exports to PDF via the

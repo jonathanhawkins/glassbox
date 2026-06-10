@@ -33,13 +33,25 @@ import "@copilotkit/react-core/v2/styles.css";
 
 import { CopilotActions } from "./CopilotActions";
 import { useActiveTask } from "@/lib/cockpit/ActiveTaskContext";
-import { defaultGoalFor, type TaskName } from "@/lib/cockpit/tasks";
+import { defaultGoalFor } from "@/lib/cockpit/tasks";
+import { useTasks } from "@/lib/cockpit/useTasks";
+
+// Resolve the active task's goal from the live task list (GET /api/tasks), which
+// carries a goal for EVERY task (algotune, perf_takehome, speedkit, BYO, ...),
+// not just the two built-ins in the static fallback table. Without this the
+// copilot's first suggestion chip and mission goal go empty whenever the operator
+// switches to a task that TASK_GOALS does not know about.
+function useActiveGoal(): string {
+  const task = useActiveTask();
+  const { tasks } = useTasks();
+  const meta = tasks.find((t) => t.id === task);
+  return defaultGoalFor(task, meta);
+}
 
 // Operating instructions for the model, grounded on the ACTIVE task so the copilot
 // talks about (and triggers a build for) the task the operator selected, not always
 // the tokenizer. The tool-usage rules are task-agnostic; only the goal varies.
-function systemInstructions(task: TaskName): string {
-  const goal = defaultGoalFor(task);
+function systemInstructions(goal: string): string {
   return [
     `You are Glassbox mission control: the operator's copilot for a self-improving agent swarm. The current task is to ${goal}, and the swarm grades itself against a hard, checkable oracle (an exact-match diff or a real test suite).`,
     "To start a build, call the launch tools. Do not just describe what you would do, actually call the tool.",
@@ -55,10 +67,10 @@ function systemInstructions(task: TaskName): string {
 // chat, so the operating instructions are injected as agent context (the model
 // sees this alongside the tool descriptions). Re-injected when the task switches.
 function MissionContext() {
-  const task = useActiveTask();
+  const goal = useActiveGoal();
   useAgentContext({
     description: "Glassbox mission control operating instructions",
-    value: systemInstructions(task),
+    value: systemInstructions(goal),
   });
   return null;
 }
@@ -70,9 +82,9 @@ function Suggestions() {
   // The first chip follows the active task's goal (Port the BPE tokenizer to Rust /
   // Build the textkit Python library); the rest are task-agnostic (approve a step,
   // draw the curve, draw the climb matrix, draw the leaderboard). Re-configured on
-  // task switch via the [task] dep.
+  // task switch (and when the live goal lands from /api/tasks) via the deps below.
   const task = useActiveTask();
-  const goal = defaultGoalFor(task);
+  const goal = useActiveGoal();
   const goalTitle = goal.charAt(0).toUpperCase() + goal.slice(1);
   // `always`: keep the chips visible before AND after every message, so once the
   // copilot renders one artifact the operator can jump straight to the next view
@@ -82,7 +94,10 @@ function Suggestions() {
     {
       available: "always",
       suggestions: [
-        { title: goalTitle, message: goal },
+        // Drop the goal chip entirely while the goal is still unresolved (a task
+        // outside the curated fallback table, before /api/tasks lands) so we never
+        // render a blank pill.
+        ...(goal ? [{ title: goalTitle, message: goal }] : []),
         {
           title: "Propose the next improvement",
           message: "Propose the next improvement and ask me to approve it",
@@ -101,7 +116,7 @@ function Suggestions() {
         },
       ],
     },
-    [task],
+    [task, goal],
   );
   return null;
 }
@@ -121,11 +136,11 @@ function MissionWelcome({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-2">
-        <p className="max-w-[34ch] text-[12.5px] leading-relaxed text-slate-400">
+        <p className="max-w-[34ch] text-[12.5px] leading-relaxed text-ink-mid">
           Type a goal and the swarm plans, builds, and grades itself against a
           hard oracle, then rewrites its own skill to climb the curve.
         </p>
-        <div className="mb-1.5 mt-4 text-[9.5px] font-medium uppercase tracking-[0.2em] text-slate-600">
+        <div className="mb-1.5 mt-4 font-mono text-[9.5px] font-medium uppercase tracking-[0.2em] text-ink-dim">
           try
         </div>
         {suggestionView}
@@ -138,17 +153,17 @@ function MissionWelcome({
 // Compact, left-aligned prompt pills (overrides the default full-width stacked
 // buttons that overflowed the dock).
 const SUGGESTION_SLOTS = {
-  container: "flex flex-col gap-1.5",
+  container: "glassbox-suggestions flex flex-col gap-1.5",
   suggestion:
-    "w-full justify-start whitespace-normal rounded-lg border border-slate-700/60 bg-slate-900/40 px-3 py-2 text-left text-[12.5px] font-normal normal-case text-slate-300 transition-colors hover:border-cyan-500/40 hover:bg-cyan-500/[0.07] hover:text-cyan-100",
+    "w-full justify-start whitespace-normal rounded-lg border border-line bg-raised/40 px-3 py-2 text-left text-[12.5px] font-normal normal-case text-ink-mid transition-colors hover:border-accent/40 hover:bg-accent/[0.07] hover:text-ink",
 } as const;
 
 // Hide the stock "AI can make mistakes" disclaimer in the demo dock.
 const INPUT_SLOTS = { showDisclaimer: false } as const;
 
 // Dark glass theme. The v2 chat reads design tokens; we apply the .dark token
-// set and override a few to match the cockpit palette (cyan primary on
-// near-black slate).
+// set and override a few to match the cockpit palette (accent primary on
+// warm near-black).
 const CHAT_THEME: CSSProperties = {
   // Match the cockpit typography: the v2 chat defaults to system ui-sans-serif,
   // which renders large and out of character next to the Geist-based cockpit.
@@ -160,15 +175,15 @@ const CHAT_THEME: CSSProperties = {
   ["--cpk-default-mono-font-family" as string]:
     "var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace",
   // Cockpit-flavored overrides of the v2 design tokens.
-  ["--background" as string]: "oklch(13% 0.02 250)",
-  ["--card" as string]: "oklch(15% 0.02 250)",
-  ["--popover" as string]: "oklch(15% 0.02 250)",
-  ["--border" as string]: "oklch(30% 0.03 230 / 0.5)",
-  ["--input" as string]: "oklch(22% 0.03 240)",
-  ["--primary" as string]: "oklch(78% 0.13 200)",
-  ["--primary-foreground" as string]: "oklch(15% 0.02 250)",
-  ["--accent" as string]: "oklch(24% 0.04 230)",
-  ["--ring" as string]: "oklch(78% 0.13 200)",
+  ["--background" as string]: "oklch(13% 0 0)",
+  ["--card" as string]: "oklch(15% 0 0)",
+  ["--popover" as string]: "oklch(15% 0 0)",
+  ["--border" as string]: "oklch(28% 0 0)",
+  ["--input" as string]: "oklch(28% 0 0)",
+  ["--primary" as string]: "oklch(70% 0.19 45)",
+  ["--primary-foreground" as string]: "oklch(15% 0 0)",
+  ["--accent" as string]: "oklch(28% 0 0)",
+  ["--ring" as string]: "oklch(70% 0.19 45)",
 };
 
 export default function CockpitCopilot() {
@@ -181,7 +196,7 @@ export default function CockpitCopilot() {
       <Suggestions />
       <div
         style={CHAT_THEME}
-        className="dark flex h-full min-h-0 flex-col overflow-hidden bg-transparent text-slate-200"
+        className="dark flex h-full min-h-0 flex-col overflow-hidden bg-transparent text-ink"
       >
         <CopilotChat
           className="glassbox-copilot-chat h-full min-h-0"
@@ -189,7 +204,7 @@ export default function CockpitCopilot() {
           input={INPUT_SLOTS}
           suggestionView={SUGGESTION_SLOTS}
           labels={{
-            chatInputPlaceholder: "Launch a run, or ask anything...",
+            chatInputPlaceholder: "Launch a run or ask...",
           }}
         />
       </div>

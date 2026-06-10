@@ -313,6 +313,12 @@ def _start_thread(target, *args, name: str) -> None:
             detail="a swarm run is already in progress; wait for it to finish",
         )
 
+    # Clear any stale stop request so it can never abort the run we are about to
+    # start (the Stop button sets this flag; run.py checks it at each boundary).
+    from . import run as run_module
+
+    run_module.clear_cancel()
+
     def _guarded() -> None:
         try:
             target(*args)
@@ -385,6 +391,18 @@ def _byo_loop_bg(task_name: str, goal: str, run_base: str, max_rounds: int) -> N
         _restore_quietly(task)
 
 
+def _optimize_loop_bg(task_name: str, goal: str, run_base: str, max_rounds: int) -> None:
+    from . import run as run_module
+
+    task = _resolve_task(task_name)
+    try:
+        run_module.optimize_loop(task, goal, run_base, max_rounds=max_rounds)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[run] optimize_loop({run_base}) failed: {exc}")
+    finally:
+        _restore_quietly(task)
+
+
 def _live_bg(task_name: str, goal: str, run_id: str, injections: int) -> None:
     from . import run as run_module
 
@@ -401,6 +419,59 @@ def _live_bg(task_name: str, goal: str, run_id: str, injections: int) -> None:
 def health() -> dict[str, bool]:
     """Liveness probe for the cockpit."""
     return {"ok": True}
+
+
+@app.get("/status")
+def status() -> dict[str, bool]:
+    """Run state for the cockpit transport panel.
+
+    ``running`` is whether the run lock is held (true for the whole run/loop, even
+    between versions); ``paused`` is whether the run is parked at a boundary
+    waiting to resume. The cockpit polls this to light the Play/Pause/Stop pills.
+    """
+    from . import run as run_module
+
+    return {"running": _RUN_LOCK.locked(), "paused": run_module.is_paused()}
+
+
+@app.post("/stop")
+def post_stop() -> dict[str, bool]:
+    """Ask the in-flight run to stop at the next wave/version boundary.
+
+    Cooperative cancellation: run.py checks the flag between waves and versions
+    and bails cleanly (never mid-bead), then the run lock releases. Returns
+    whether a run was actually in progress to stop.
+    """
+    from . import run as run_module
+
+    was_running = _RUN_LOCK.locked()
+    run_module.request_cancel()
+    return {"stopped": was_running}
+
+
+@app.post("/pause")
+def post_pause() -> dict[str, bool]:
+    """Hold the in-flight run at the next wave/version boundary (resume with /resume).
+
+    Cooperative, like /stop: the run parks cleanly between waves (never mid-bead)
+    and keeps the run lock, so it picks up in place on resume.
+    """
+    from . import run as run_module
+
+    was_running = _RUN_LOCK.locked()
+    if was_running:
+        run_module.request_pause()
+    return {"paused": was_running}
+
+
+@app.post("/resume")
+def post_resume() -> dict[str, bool]:
+    """Release a paused run so it continues from where it parked."""
+    from . import run as run_module
+
+    was_paused = run_module.is_paused()
+    run_module.resume()
+    return {"resumed": was_paused}
 
 
 def _require_task(name: str):
@@ -590,6 +661,29 @@ def post_loop(req: LoopRequest) -> dict[str, Any]:
     return {"run_base": run_base, "max_versions": max_versions}
 
 
+@app.post("/optimize")
+def post_optimize(req: LoopRequest) -> dict[str, Any]:
+    """Start the open-ended optimize loop in the background; return its run_base now.
+
+    The loop proposes a new optimization idea each round, keeps only the ones the real
+    grader confirms are correct AND strictly better, and stops when it is genuinely
+    stuck (a run of rounds with no gain). ``max_versions`` (or legacy ``versions``) caps
+    the rounds. Best for byo speed tasks (speedkit, algotune) with a continuous metric.
+    """
+    _require_task(req.task)
+    max_rounds = req.versions if req.versions is not None else req.max_versions
+    run_base = f"opt-{int(time.time() * 1000)}"
+    _start_thread(
+        _optimize_loop_bg,
+        req.task,
+        req.goal,
+        run_base,
+        max_rounds,
+        name=f"opt-{run_base}",
+    )
+    return {"run_base": run_base, "max_rounds": max_rounds, "mode": "optimize"}
+
+
 @app.post("/live")
 def post_live(req: LiveRequest) -> dict[str, Any]:
     """Start the live inject-the-gap beat in the background; return its run_id."""
@@ -664,6 +758,14 @@ def post_reset(req: ResetRequest = ResetRequest()) -> dict[str, Any]:
         task_obj.restore_workspace()
     except Exception as exc:  # noqa: BLE001
         print(f"[reset] workspace restore skipped: {exc}")
+    # Drop the per-version code snapshots too, the analog of skill.reset_history: the
+    # workspace code viewer reads history/v{n}/, so without this the code panel keeps
+    # showing the previous climb's v1..vN after a reset. Clear it so the panel starts
+    # over (current code only, "run a climb to watch it grow") like a fresh board.
+    try:
+        task_obj.reset_workspace_history()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[reset] workspace history clear skipped: {exc}")
     # Re-mirror the (now empty) bead graph immediately so the board reflects the
     # reset without waiting for a poll tick. (The skill is read per task on demand.)
     try:

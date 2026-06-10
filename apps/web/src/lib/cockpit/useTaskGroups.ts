@@ -36,8 +36,10 @@ const cache = new Map<TaskName, TaskGroups>();
 
 const EMPTY: TaskGroups = { order: [], unit: "category" };
 
-// How long to keep polling for a discovering (BYO) task before giving up (~60s).
-const MAX_POLLS = 40;
+// How many times to poll for a discovering (BYO) task before giving up. With the
+// backoff below (1.5s, 3s, then 5s steady) ~20 polls span ~95s while easing off the
+// backend instead of hammering it at a fixed 1.5s the whole time.
+const MAX_POLLS = 20;
 
 export function useTaskGroups(task: TaskName): TaskGroups {
   // Curated tasks have a fixed, known group set: return it directly so the strip and
@@ -76,8 +78,11 @@ export function useTaskGroups(task: TaskName): TaskGroups {
       // No groups yet (BYO still discovering): poll a bounded number of times so a
       // discovering BYO task lights up without a reload.
       if (!cancelled && polls < MAX_POLLS) {
+        // Backoff: 1.5s, 3s, then 5s steady. Eases backend load the longer a BYO task
+        // stays in discovery, without changing how fast groups first light up.
+        const delay = polls === 0 ? 1500 : polls === 1 ? 3000 : 5000;
         polls += 1;
-        timer = setTimeout(tick, 1500);
+        timer = setTimeout(tick, delay);
       }
     };
 

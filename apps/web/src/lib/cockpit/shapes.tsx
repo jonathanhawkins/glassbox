@@ -52,6 +52,7 @@ declare module "@tldraw/tlschema" {
     bead: {
       w: number;
       h: number;
+      beadId: string;
       label: string;
       title: string;
       capability: string;
@@ -118,28 +119,42 @@ export class AgentShapeUtil extends BaseBoxShapeUtil<AgentShape> {
 
   override component(shape: AgentShape) {
     const { agent, role, status, w, h } = shape.props;
-    const light = STATUS_COLORS[status as keyof typeof STATUS_COLORS] ?? "#475569";
+    const light = STATUS_COLORS[status as keyof typeof STATUS_COLORS] ?? "#6e6e73";
     const isWorking = status === "working";
     const roleLabel = role || AGENT_ROLES[agent] || "";
     return (
       <HTMLContainer>
         <div
+          role="button"
+          tabIndex={0}
+          title={`inspect ${agent}`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (typeof window !== "undefined")
+              window.dispatchEvent(
+                new CustomEvent("glassbox:agent-click", {
+                  detail: { agent, x: e.clientX, y: e.clientY },
+                }),
+              );
+          }}
           style={{
             width: w,
             height: h,
             boxSizing: "border-box",
-            borderRadius: 14,
-            border: `1px solid ${isWorking ? "rgba(245,158,11,0.55)" : "rgba(148,163,184,0.22)"}`,
+            cursor: "pointer",
+            borderRadius: 10,
+            border: `1px solid ${isWorking ? "rgba(255,106,26,0.55)" : "rgba(255,255,255,0.08)"}`,
             background:
-              "linear-gradient(160deg, rgba(30,41,59,0.92), rgba(15,23,42,0.92))",
+              "linear-gradient(160deg, rgba(28,28,31,0.94), rgba(17,17,19,0.94))",
             boxShadow: isWorking
-              ? "0 0 22px rgba(245,158,11,0.30), inset 0 1px 0 rgba(255,255,255,0.05)"
-              : "0 6px 18px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)",
+              ? "0 0 22px rgba(255,106,26,0.26), inset 0 1px 0 rgba(255,255,255,0.04)"
+              : "0 6px 18px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.03)",
             padding: "12px 14px",
             display: "flex",
             flexDirection: "column",
             justifyContent: "space-between",
-            color: "#e2e8f0",
+            color: "#f5f5f4",
             fontFamily: "var(--font-geist-mono, ui-monospace, monospace)",
             pointerEvents: "all",
             transition: "border-color 240ms ease, box-shadow 240ms ease",
@@ -162,7 +177,7 @@ export class AgentShapeUtil extends BaseBoxShapeUtil<AgentShape> {
                 fontSize: 14,
                 fontWeight: 600,
                 letterSpacing: 0.3,
-                color: "#f1f5f9",
+                color: "#f5f5f4",
               }}
             >
               {agent}
@@ -171,7 +186,7 @@ export class AgentShapeUtil extends BaseBoxShapeUtil<AgentShape> {
           <div
             style={{
               fontSize: 11,
-              color: "#94a3b8",
+              color: "#a1a1a6",
               letterSpacing: 0.2,
             }}
           >
@@ -252,7 +267,7 @@ export class DockShapeUtil extends BaseBoxShapeUtil<DockShape> {
 
   override component(shape: DockShape) {
     const { w, h, active } = shape.props;
-    const edge = active ? "rgba(245,158,11,0.55)" : "rgba(148,163,184,0.30)";
+    const edge = active ? "rgba(255,106,26,0.55)" : "rgba(255,255,255,0.10)";
     return (
       <HTMLContainer>
         <div
@@ -260,19 +275,19 @@ export class DockShapeUtil extends BaseBoxShapeUtil<DockShape> {
             width: w,
             height: h,
             boxSizing: "border-box",
-            borderRadius: 14,
+            borderRadius: 10,
             border: `1.5px dashed ${edge}`,
             background: active
-              ? "rgba(245,158,11,0.05)"
-              : "rgba(148,163,184,0.03)",
+              ? "rgba(255,106,26,0.05)"
+              : "rgba(255,255,255,0.015)",
             boxShadow: active
-              ? "inset 0 0 18px rgba(245,158,11,0.10)"
+              ? "inset 0 0 18px rgba(255,106,26,0.10)"
               : "none",
             display: "flex",
             alignItems: "flex-start",
             justifyContent: "flex-start",
             padding: "5px 9px",
-            color: active ? "rgba(245,158,11,0.75)" : "rgba(148,163,184,0.45)",
+            color: active ? "rgba(255,106,26,0.80)" : "rgba(161,161,166,0.45)",
             fontFamily: "var(--font-geist-mono, ui-monospace, monospace)",
             fontSize: 9,
             letterSpacing: 1.4,
@@ -295,6 +310,7 @@ export type BeadShape = TLBaseShape<
   {
     w: number;
     h: number;
+    beadId: string;
     label: string;
     title: string;
     capability: string;
@@ -303,13 +319,13 @@ export type BeadShape = TLBaseShape<
 >;
 
 const RING_BY_STATE: Record<BeadState, string> = {
-  backlog: "rgba(148,163,184,0.45)",
-  claimed: "#fbbf24",
-  working: "#f59e0b",
-  done: "#38bdf8",
-  passed: "#22c55e",
-  failed: "#ef4444",
-  injected: "#e879f9",
+  backlog: "rgba(161,161,166,0.40)", // neutral gray
+  claimed: "#ff6a1a", // accent (active)
+  working: "#ff6a1a", // accent (active)
+  done: "#9aa0a6", // neutral light (settled)
+  passed: "#5ba372", // pass green
+  failed: "#d85a52", // fail red
+  injected: "#ff8a3d", // accent-bright (hot / new)
 };
 
 export class BeadShapeUtil extends BaseBoxShapeUtil<BeadShape> {
@@ -318,6 +334,7 @@ export class BeadShapeUtil extends BaseBoxShapeUtil<BeadShape> {
   static override props: RecordProps<BeadShape> = {
     w: T.number,
     h: T.number,
+    beadId: T.string,
     label: T.string,
     title: T.string,
     capability: T.string,
@@ -328,6 +345,7 @@ export class BeadShapeUtil extends BaseBoxShapeUtil<BeadShape> {
     return {
       w: BEAD_W,
       h: BEAD_H,
+      beadId: "",
       label: "bead",
       title: "",
       capability: "ascii",
@@ -363,37 +381,66 @@ export class BeadShapeUtil extends BaseBoxShapeUtil<BeadShape> {
   }
 
   override component(shape: BeadShape) {
-    const { label, title, capability, state, w, h } = shape.props;
+    const { beadId, label, title, capability, state, w, h } = shape.props;
     const color = capColor(capability);
     const ring = RING_BY_STATE[state as BeadState] ?? RING_BY_STATE.backlog;
     const isActive = state === "working" || state === "claimed" || state === "injected";
     const isFailed = state === "failed";
     const isPassed = state === "passed";
+    // A click on a bead opens the task inspector. The board is locked and
+    // programmatic, so instead of plumbing a React callback through tldraw's
+    // shape tree we dispatch a window event (the bead id + click point) that the
+    // cockpit listens for; it resolves the live task detail and shows the popover.
+    // stopPropagation on pointer-down keeps the click from starting a canvas pan.
+    const openInspector = (clientX: number, clientY: number) => {
+      if (typeof window === "undefined") return;
+      window.dispatchEvent(
+        new CustomEvent("glassbox:bead-click", {
+          detail: { beadId, x: clientX, y: clientY },
+        }),
+      );
+    };
     return (
       <HTMLContainer>
         <div
+          role="button"
+          tabIndex={0}
+          title="View task details"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            openInspector(e.clientX, e.clientY);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              openInspector(r.left + r.width / 2, r.bottom);
+            }
+          }}
           style={{
             width: w,
             height: h,
             boxSizing: "border-box",
-            borderRadius: 12,
+            borderRadius: 9,
             border: `2px solid ${ring}`,
-            background: `linear-gradient(150deg, ${hexA(color, 0.26)}, rgba(15,23,42,0.94))`,
+            background: `linear-gradient(150deg, ${hexA(color, 0.22)}, rgba(17,17,19,0.95))`,
             boxShadow: isActive
-              ? `0 0 16px ${hexA(ring, 0.55)}`
+              ? `0 0 16px ${hexA(ring, 0.5)}`
               : isPassed
-                ? `0 0 14px ${hexA("#22c55e", 0.45)}`
+                ? `0 0 12px ${hexA("#5ba372", 0.4)}`
                 : isFailed
-                  ? `0 0 14px ${hexA("#ef4444", 0.5)}`
+                  ? `0 0 12px ${hexA("#d85a52", 0.45)}`
                   : "0 4px 12px rgba(0,0,0,0.4)",
             padding: "6px 9px",
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
             gap: 2,
-            color: "#e2e8f0",
+            color: "#f5f5f4",
             fontFamily: "var(--font-geist-mono, ui-monospace, monospace)",
             pointerEvents: "all",
+            cursor: "pointer",
             transition:
               "border-color 260ms ease, box-shadow 260ms ease, background 260ms ease",
             animation: state === "injected" ? "gb-pop 600ms ease-out" : "none",
@@ -414,7 +461,7 @@ export class BeadShapeUtil extends BaseBoxShapeUtil<BeadShape> {
               style={{
                 fontSize: 11,
                 fontWeight: 600,
-                color: "#f1f5f9",
+                color: "#f5f5f4",
                 whiteSpace: "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -426,7 +473,7 @@ export class BeadShapeUtil extends BaseBoxShapeUtil<BeadShape> {
           <div
             style={{
               fontSize: 10,
-              color: "#cbd5e1",
+              color: "#a1a1a6",
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",

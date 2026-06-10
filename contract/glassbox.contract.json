@@ -12,7 +12,8 @@
     "beadsState": "glassbox:beads",
     "skillState": "glassbox:skill",
     "runsList": "glassbox:runs",
-    "runMetaPrefix": "glassbox:run:"
+    "runMetaPrefix": "glassbox:run:",
+    "swarmLogPrefix": "glassbox:swarm:log:"
   },
   "eventTypes": [
     "run_started",

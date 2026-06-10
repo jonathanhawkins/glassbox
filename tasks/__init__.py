@@ -10,11 +10,29 @@ from __future__ import annotations
 
 from .base import Task
 
-DEFAULT_TASK = "tokenizer"
+DEFAULT_TASK = "speedkit"
 
 # id -> static descriptor. ``module`` is imported lazily by load_task; everything
 # else is returned by task_specs() as-is (no task import needed).
 TASK_SPECS: dict[str, dict] = {
+    "algotune": {
+        "module": ".algotune",
+        "kind": "byo",
+        "goal": "beat real numpy/scipy reference solvers (AlgoTune benchmark)",
+        "unit": "task",
+    },
+    "speedkit": {
+        "module": ".speedkit",
+        "kind": "byo",
+        "goal": "optimize a suite of naive hot functions for speed",
+        "unit": "function",
+    },
+    "perf_takehome": {
+        "module": ".perf_takehome",
+        "kind": "byo",
+        "goal": "optimize Anthropic's kernel take-home for the fewest cycles",
+        "unit": "milestone",
+    },
     "tokenizer": {
         "module": ".tokenizer",
         "kind": "curated",

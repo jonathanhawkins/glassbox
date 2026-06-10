@@ -397,6 +397,52 @@ def get_planner_meta(task: str = "tokenizer") -> dict[int, dict[str, Any]]:
     return out
 
 
+def integrity_key(task: str = DEFAULT_TASK) -> str:
+    """The per-task integrity key (a Redis hash for the cockpit's integrity panel)."""
+    t = (task or DEFAULT_TASK).strip() or DEFAULT_TASK
+    return f"glassbox:integrity:{t}"
+
+
+def record_integrity_block(task: str, paths: Any) -> None:
+    """Record that the worker's allow-list blocked a forbidden edit.
+
+    The BYO worker may only write its ``edit_globs`` and never the read-only test
+    paths; when a model reply proposes an out-of-bounds file (e.g. a tests/ file or
+    the frozen simulator) the edit is dropped and this bumps the per-task ``blocked``
+    counter the integrity panel shows. Best-effort: never breaks a run.
+    """
+    items = [str(p) for p in (paths or []) if p]
+    if not items:
+        return
+    try:
+        client = get_client()
+        key = integrity_key(task)
+        client.hincrby(key, "blocked", len(items))
+        client.hset(key, "last_blocked", ", ".join(sorted(set(items))[:5]))
+    except Exception as exc:  # noqa: BLE001 - integrity telemetry is best-effort
+        print(f"[bus] integrity block record skipped: {exc}")
+
+
+def get_integrity(task: str = DEFAULT_TASK) -> dict[str, Any]:
+    """Read the per-task integrity counters ({blocked, last_blocked}). Best-effort."""
+    try:
+        raw = get_client().hgetall(integrity_key(task)) or {}
+    except Exception:  # noqa: BLE001
+        return {"blocked": 0, "last_blocked": ""}
+    return {
+        "blocked": int(raw.get("blocked", 0) or 0),
+        "last_blocked": raw.get("last_blocked", "") or "",
+    }
+
+
+def clear_integrity(task: str = DEFAULT_TASK) -> None:
+    """Drop a task's integrity counters (called at the start of a climb)."""
+    try:
+        get_client().delete(integrity_key(task))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[bus] clear_integrity skipped: {exc}")
+
+
 def clear_leaderboard(task: str = DEFAULT_TASK) -> int:
     """Delete ONE task's leaderboard scores and per-version metadata.
 

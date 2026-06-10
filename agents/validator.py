@@ -142,6 +142,20 @@ def validate(
         )
     accuracy = float(result.score)
     passed = accuracy >= PASS_THRESHOLD
+    # Task-specific metrics (e.g. the perf task's raw cycle count and speedup) ride
+    # alongside the uniform score; empty for tokenizer/textkit. Surfaced to the
+    # leaderboard meta and the event payload so the cockpit's cycle gauge reads the
+    # real number rather than the normalized score.
+    extra = dict(getattr(result, "extra", {}) or {})
+    # A correct-but-not-yet-target perf version is "partial" (still climbing), not
+    # "failed". For tasks without a correctness flag this preserves the prior behavior
+    # (passed == accuracy >= 1.0, else failed).
+    if accuracy >= 1.0:
+        status = "passed"
+    elif extra.get("correct", passed):
+        status = "partial"
+    else:
+        status = "failed"
 
     bus.set_planner_score(planner_version, accuracy, task=getattr(task, "name", "tokenizer"))
 
@@ -171,12 +185,16 @@ def validate(
         accuracy=accuracy,
         wall_ms=getattr(result, "wall_ms", 0),
         weave_eval_url=weave_eval_url,
-        status="passed" if accuracy >= 1.0 else ("partial" if passed else "failed"),
+        status=status,
         covered=scoring_caps,
         # The real per-category pass tally (passed/total per scoring group) from the
         # same graded run. Surfaced so the cockpit can draw the climb matrix with true
         # pass-fraction cells, not just binary covered/not. Small (a handful of groups).
         by_group={k: dict(v) for k, v in (result.by_group or {}).items()},
+        # Task-specific metrics (the perf cycle count, the speedkit mean speedup, ...)
+        # for the cockpit gauge, carried as one nested blob. None (and dropped) for
+        # tokenizer/textkit, so their meta is unchanged.
+        extra=extra or None,
     )
 
     # The real per-group failure breakdown (biggest gap first) is the signal the
@@ -203,6 +221,7 @@ def validate(
             "oracle_error": result.error,
             "weave_eval_url": weave_eval_url,
             "weave_eval_logged": bool(weave_eval_result.get("logged")),
+            "extra": extra,
         },
     )
     # The grade-pass / grade-fail mail rides the SAME exact-match bar as the

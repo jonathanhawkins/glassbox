@@ -251,7 +251,9 @@ def _author_source(
 
 
 _BYO_MAX_CONTEXT_FILES = 12
-_BYO_MAX_FILE_CHARS = 6000
+# Large enough to show the whole perf-takehome kernel (~11 KB) plus the read-only
+# machine reference (problem.py, ~20 KB) so the model has the full ISA in context.
+_BYO_MAX_FILE_CHARS = 22000
 
 
 def _glob_match(rel: str, glob: str) -> bool:
@@ -332,9 +334,16 @@ def _byo_parse_files(reply: str) -> dict[str, str]:
             obj = json.loads(block.group(0))
         except (json.JSONDecodeError, TypeError):
             return {}
-    files = obj.get("files") if isinstance(obj, dict) else None
-    if not isinstance(files, dict):
+    if not isinstance(obj, dict):
         return {}
+    files = obj.get("files")
+    if not isinstance(files, dict):
+        # Tolerate a reply that returned the {path: contents} map directly (no "files"
+        # wrapper), as long as every value is a string (file contents).
+        if obj and all(isinstance(v, str) for v in obj.values()):
+            files = obj
+        else:
+            return {}
     return {str(k): str(v) for k, v in files.items() if isinstance(v, str)}
 
 
@@ -381,17 +390,49 @@ def _byo_author_llm(
         },
     ]
     try:
-        reply = llm.chat(messages, model=model, temperature=0.1, max_tokens=4096)
+        reply = llm.chat(messages, model=model, temperature=0.1, max_tokens=16000)
     except llm.LLMError as exc:
         print(f"[worker] BYO LLM unavailable, bead will bounce: {exc}")
         return {}
-    return _byo_parse_files(reply)
+    files = _byo_parse_files(reply)
+    if not files:
+        # Fallback: a single fenced code block maps to the sole editable file (the
+        # common case for a one-file repo like the perf kernel), so a model that
+        # answered with ```python instead of the JSON object still lands its edit.
+        m = re.search(r"```(?:python|py)?\s*(.*?)```", reply, re.DOTALL)
+        literal = next(
+            (
+                g
+                for g in (getattr(task, "edit_globs", []) or [])
+                if "*" not in g and "?" not in g
+            ),
+            None,
+        )
+        if m and literal:
+            files = {literal: m.group(1).strip()}
+    return files
+
+
+def _byo_attempts() -> int:
+    """How many feedback-driven attempts a BYO bead gets (GLASSBOX_BYO_ATTEMPTS)."""
+    try:
+        return max(1, int(os.environ.get("GLASSBOX_BYO_ATTEMPTS", "3")))
+    except ValueError:
+        return 3
 
 
 def _author_source_byo(task: Any, capability: str) -> dict[str, Any]:
-    """BYO authoring: real LLM edits, no fallback. Keep the edit only if it builds
-    and strictly raises the score AND leaves the test files untouched; else revert
-    every touched file and bounce the bead (score flat)."""
+    """BYO authoring: real LLM edits, no fallback. Keep the edit only if it builds,
+    leaves the read-only tests untouched, AND strictly raises the score.
+
+    The model gets a few feedback-driven attempts: it edits the repo, the grader runs,
+    and any build OR grade-time error (a runtime crash, a correctness regression, or
+    simply no speedup) is fed back into the next attempt, the way the take-home itself
+    is solved. A no-build task only sees a broken kernel at grade time, so feeding the
+    grader's error back is what lets the model converge instead of bouncing on its
+    first aggressive rewrite. Every touched file is reverted to its pre-bead contents
+    if no attempt lands a gain.
+    """
     edit_globs = list(getattr(task, "edit_globs", []) or [])
     test_paths = list(getattr(task, "test_paths", []) or [])
 
@@ -400,48 +441,56 @@ def _author_source_byo(task: Any, capability: str) -> dict[str, Any]:
     test_hashes = _byo_test_hashes(task)
     failing = [f for f in before.failures if f.get("group") == capability]
 
-    def attempt(build_error: str = "") -> tuple[bool, dict[str, str]]:
-        proposed = _byo_author_llm(task, capability, failing, build_error)
+    pre_bead: dict[str, str] = {}  # earliest pre-bead contents, for a clean revert
+    error = ""
+    for _ in range(_byo_attempts()):
+        proposed = _byo_author_llm(task, capability, failing, error)
         allowed = {
             rel: src
             for rel, src in proposed.items()
             if _byo_path_allowed(rel, edit_globs, test_paths)
         }
+        # Anti-gaming: a reply that proposed editing a read-only test file or any other
+        # non-editable source is dropped here; record the rejection for the cockpit's
+        # integrity panel (the grader is provably untouched).
+        blocked = [rel for rel in proposed if rel not in allowed]
+        if blocked:
+            bus.record_integrity_block(getattr(task, "name", None) or "", blocked)
         if not allowed:
-            return False, {}
-        # Snapshot the files we are about to touch so we can revert on bounce.
-        snapshot = {rel: task.read_target(rel) for rel in allowed}
+            break
+        for rel in allowed:
+            pre_bead.setdefault(rel, task.read_target(rel))
         for rel, src in allowed.items():
             task.write_target(rel, src)
-        return True, snapshot
 
-    wrote, snapshot = attempt()
-    if not wrote:
-        return _byo_bounced(before)
-
-    ok, err = task.build()
-    if not ok:
-        wrote2, snap2 = attempt(build_error=err)
-        if wrote2:
-            snapshot = {**snap2, **snapshot}  # keep the earliest pre-bead contents
-            ok, err = task.build()
-
-    kept = False
-    if ok:
+        ok, build_err = task.build()
+        if not ok:
+            error = f"the build failed:\n{build_err[:600]}"
+            continue
         after = task.evaluate()
-        tampered = _byo_test_hashes(task) != test_hashes
-        if after.score > before.score and not tampered:
-            kept = True
+        if _byo_test_hashes(task) != test_hashes:
+            break  # the read-only tests changed; refuse the edit outright
+        if after.score > before.score:
             return {
                 "source_kind": "llm",
-                "files": sorted(snapshot.keys()),
+                "files": sorted(pre_bead.keys()),
                 "score_before": round(before.score, 4),
                 "score_after": round(after.score, 4),
             }
-    # Bounced: revert every touched file to its pre-bead contents.
-    if not kept:
-        for rel, src in snapshot.items():
-            task.write_target(rel, src)
+        # Built but did not help: feed the grader's error (a crash or a correctness
+        # regression a no-build task only sees now) back, or nudge for a bolder change.
+        error = (
+            f"your change did not pass. The grader reported:\n{after.error[:600]}\n"
+            "Fix it, keep the output identical to the reference, and reduce cycles."
+            if after.error
+            else "your change kept the output correct but did not reduce the cycle "
+            "count. Make a bolder optimization (slot packing, vectorization, fewer "
+            "loads) while keeping the output identical to the reference."
+        )
+
+    # No attempt landed a gain: revert every touched file to its pre-bead contents.
+    for rel, src in pre_bead.items():
+        task.write_target(rel, src)
     return _byo_bounced(before)
 
 

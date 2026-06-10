@@ -51,23 +51,7 @@ export async function proxyPost(path: string, req: Request): Promise<Response> {
 
   // Relay the backend response. Prefer JSON; if the backend returned non-JSON,
   // wrap it so the client still receives parseable JSON.
-  const text = await upstream.text();
-  let payload: unknown;
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    return Response.json(
-      {
-        ok: false,
-        error: "backend_bad_response",
-        status: upstream.status,
-        body: text.slice(0, 2000),
-      },
-      { status: upstream.ok ? 502 : upstream.status },
-    );
-  }
-
-  return Response.json(payload, { status: upstream.status });
+  return relayJson(upstream, await upstream.text());
 }
 
 /**
@@ -93,10 +77,19 @@ export async function proxyGet(path: string): Promise<Response> {
     );
   }
 
-  const text = await upstream.text();
-  let payload: unknown;
+  return relayJson(upstream, await upstream.text());
+}
+
+/**
+ * Relay an already-read upstream JSON body to the client. Validates that the body
+ * parses (so callers keep their "always parseable JSON" guarantee) but forwards the
+ * original bytes rather than re-serializing the parsed object, avoiding a second full
+ * JSON pass over large payloads (e.g. workspace snapshots) on the hot proxy path.
+ */
+function relayJson(upstream: globalThis.Response, text: string): Response {
+  if (!text) return Response.json({}, { status: upstream.status });
   try {
-    payload = text ? JSON.parse(text) : {};
+    JSON.parse(text); // validate only; relay the original bytes below
   } catch {
     return Response.json(
       {
@@ -108,6 +101,8 @@ export async function proxyGet(path: string): Promise<Response> {
       { status: upstream.ok ? 502 : upstream.status },
     );
   }
-
-  return Response.json(payload, { status: upstream.status });
+  return new Response(text, {
+    status: upstream.status,
+    headers: { "Content-Type": "application/json" },
+  });
 }

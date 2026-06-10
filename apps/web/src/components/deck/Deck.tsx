@@ -13,9 +13,19 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { SLIDES } from "./slides";
 
-export function Deck() {
+// The deck shell renders whatever slide list it is given. The full pitch (`/deck`)
+// shows every slide; the 3-minute cut (`/deck/short`) passes `only` (a list of
+// slide ids) to render a curated subset in that order. `only` is plain strings so
+// it crosses the server/client boundary cleanly (the slide objects, with their
+// render functions, live entirely on the client). Same keyboard nav, progress
+// bar, dot rail, and PDF export for both.
+export function Deck({ only }: { only?: readonly string[] }) {
+  const slides = only
+    ? only.map((id) => SLIDES.find((s) => s.id === id)).filter((s) => s != null)
+    : SLIDES;
+
   const [index, setIndex] = useState(0);
-  const total = SLIDES.length;
+  const total = slides.length;
 
   const go = useCallback(
     (next: number) => {
@@ -74,7 +84,7 @@ export function Deck() {
     return () => window.removeEventListener("keydown", onKey);
   }, [next, prev, go, total, exportPdf]);
 
-  const slide = SLIDES[index];
+  const slide = slides[index];
   const progress = total > 1 ? (index / (total - 1)) * 100 : 100;
 
   return (
@@ -98,7 +108,7 @@ export function Deck() {
         @media print {
           @page { size: landscape; margin: 0; }
           html, body {
-            background: #060a14 !important;
+            background: #0b0b0c !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
@@ -108,7 +118,7 @@ export function Deck() {
             width: 100vw;
             height: 100vh;
             overflow: hidden;
-            background: #060a14;
+            background: #0b0b0c;
             break-after: page;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
@@ -117,12 +127,12 @@ export function Deck() {
         }
       `}</style>
 
-    <main className="gb-deck-screen relative h-full w-full overflow-hidden bg-[#060a14] text-slate-200">
+    <main className="gb-deck-screen relative h-full w-full overflow-hidden bg-canvas text-ink-mid">
 
       {/* Top progress bar. */}
-      <div className="absolute inset-x-0 top-0 z-30 h-0.5 bg-slate-800/60">
+      <div className="absolute inset-x-0 top-0 z-30 h-0.5 bg-white/5">
         <div
-          className="h-full bg-gradient-to-r from-cyan-400 via-cyan-300 to-violet-400 transition-[width] duration-500 ease-out"
+          className="h-full bg-gradient-to-r from-accent via-accent to-accent-bright transition-[width] duration-500 ease-out"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -152,14 +162,14 @@ export function Deck() {
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex items-center justify-between px-7 py-5">
         <Link
           href="/"
-          className="pointer-events-auto font-mono text-xs uppercase tracking-[0.18em] text-slate-500 transition hover:text-cyan-300"
+          className="pointer-events-auto font-mono text-xs uppercase tracking-[0.18em] text-ink-dim transition hover:text-accent"
         >
           {"<-"} live cockpit
         </Link>
 
         {/* Dot rail. Clickable for direct jumps during Q and A. */}
         <div className="pointer-events-auto flex items-center gap-2">
-          {SLIDES.map((s, i) => (
+          {slides.map((s, i) => (
             <button
               key={s.id}
               type="button"
@@ -168,8 +178,8 @@ export function Deck() {
               onClick={() => go(i)}
               className={`h-1.5 rounded-full transition-all duration-300 ${
                 i === index
-                  ? "w-6 bg-cyan-300"
-                  : "w-1.5 bg-slate-600 hover:bg-slate-400"
+                  ? "w-6 bg-accent"
+                  : "w-1.5 bg-ink-faint hover:bg-ink-dim"
               }`}
             />
           ))}
@@ -180,12 +190,12 @@ export function Deck() {
             type="button"
             onClick={exportPdf}
             title="Export the deck to PDF (P)"
-            className="font-mono text-xs uppercase tracking-[0.18em] text-slate-500 transition hover:text-cyan-300"
+            className="font-mono text-xs uppercase tracking-[0.18em] text-ink-dim transition hover:text-accent"
           >
             export pdf
           </button>
-          <div className="font-mono text-xs tabular-nums tracking-[0.18em] text-slate-500">
-            <span className="text-slate-300">
+          <div className="font-mono text-xs tabular-nums tracking-[0.18em] text-ink-dim">
+            <span className="text-ink-mid">
               {String(index + 1).padStart(2, "0")}
             </span>{" "}
             / {String(total).padStart(2, "0")}
@@ -198,7 +208,7 @@ export function Deck() {
         (.gb-print is display:none), revealed by the @media print rules above when
         the user exports to PDF. */}
     <div className="gb-print" aria-hidden>
-      {SLIDES.map((s) => (
+      {slides.map((s) => (
         <div key={s.id} className="gb-print-page">
           {s.render()}
         </div>

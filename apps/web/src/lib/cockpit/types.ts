@@ -28,16 +28,39 @@ export type BeadState =
   | "failed"
   | "injected";
 
-/** Neon palette per capability. Used by the bead shapes and the legend. */
+/**
+ * Full task detail for the bead inspector popover (shown when an operator clicks
+ * a bead on the board). The board controller assembles this from its live record
+ * plus the shape's current state, so the popover reflects the task as it stands
+ * right now (which worker holds it, whether it has passed the oracle, etc.).
+ */
+export type BeadDetail = {
+  beadId: string;
+  /** Short chip id (e.g. "sd0"). */
+  label: string;
+  /** Full task title as the planner wrote it (not the shortened chip title). */
+  title: string;
+  capability: string;
+  state: BeadState;
+  /** The worker lane currently holding the task, if any. */
+  worker?: string;
+};
+
+/**
+ * Muted categorical palette per capability. Desaturated, harmonious tones that
+ * read on the near-black board without competing with the one vivid hue (the
+ * orange accent reserved for active/running state). Used by the bead shapes and
+ * the legend.
+ */
 export const CAP_COLORS: Record<Capability, string> = {
-  ascii: "#38bdf8", // sky
-  punctuation: "#a78bfa", // violet
-  numbers: "#34d399", // emerald
-  code: "#f472b6", // pink
-  unicode: "#fbbf24", // amber
-  emoji: "#fb7185", // rose
-  whitespace: "#22d3ee", // cyan
-  harness: "#94a3b8", // slate (structural, does not score)
+  ascii: "#7e8aa2", // slate
+  punctuation: "#9c84a8", // mauve
+  numbers: "#6f9e83", // sage
+  code: "#b06f58", // clay
+  unicode: "#a88a5c", // sand
+  emoji: "#a77e86", // rosewood
+  whitespace: "#5e94a8", // teal
+  harness: "#8d8f9c", // steel (structural, does not score)
 };
 
 /** Short human label per capability for the legend. */
@@ -53,7 +76,7 @@ export const CAP_LABELS: Record<Capability, string> = {
 };
 
 /** Fallback color for an unknown / missing capability tag. */
-export const UNKNOWN_CAP_COLOR = "#64748b";
+export const UNKNOWN_CAP_COLOR = "#6e6e73";
 
 export function capColor(cap: string | undefined): string {
   if (cap && cap in CAP_COLORS) return CAP_COLORS[cap as Capability];
@@ -78,14 +101,15 @@ function hashString(s: string): number {
 
 /**
  * A stable color for any scoring group. Known tokenizer groups keep their
- * hand-tuned neon from CAP_COLORS; unknown groups hash their name to a fixed HSL
- * hue (saturated and bright enough to read on the dark board), so the same group
+ * hand-tuned muted tone from CAP_COLORS; unknown groups hash their name to a
+ * fixed HSL hue at low saturation, so they stay in the disciplined, desaturated
+ * register (no neon) while still being distinguishable, and the same group
  * always gets the same color across renders and reloads.
  */
 export function groupColor(group: string): string {
   if (group in CAP_COLORS) return CAP_COLORS[group as Capability];
   const hue = hashString(group) % 360;
-  return `hsl(${hue}, 70%, 62%)`;
+  return `hsl(${hue}, 22%, 62%)`;
 }
 
 /**
@@ -101,10 +125,10 @@ export function groupLabel(group: string): string {
 
 /** Status light colors for an agent lane. */
 export const STATUS_COLORS: Record<AgentStatus, string> = {
-  idle: "#475569", // slate-600
-  working: "#f59e0b", // amber-500 (pulses)
-  done: "#22c55e", // green-500
-  failed: "#ef4444", // red-500
+  idle: "#6e6e73", // ink-dim (gray)
+  working: "#ff6a1a", // accent orange (pulses, the live "RUNNING" signal)
+  done: "#9aa0a6", // neutral light
+  failed: "#d85a52", // muted red
 };
 
 /** Role label shown under each agent name. */
@@ -191,9 +215,13 @@ export function hasDock(agent: string): boolean {
   return agent.startsWith("worker-");
 }
 
-/** Top-left of a worker's dock zone, in page space. */
-export function dockPos(worker: string): { x: number; y: number } {
-  const p = AGENT_POS[worker] ?? AGENT_POS["worker-1"];
+/** Top-left of a worker's dock zone, in page space. Pass `pos` to override the lane
+ *  position (the swarm board relays out workers dynamically; the cockpit omits it). */
+export function dockPos(
+  worker: string,
+  pos?: { x: number; y: number },
+): { x: number; y: number } {
+  const p = pos ?? AGENT_POS[worker] ?? AGENT_POS["worker-1"];
   return { x: p.x, y: p.y + LANE_H + DOCK_GAP };
 }
 
@@ -202,8 +230,12 @@ export function dockPos(worker: string): { x: number; y: number } {
  * horizontally, stacked top-down. Slots beyond the dock's visible height keep
  * stacking downward (rare; a worker usually holds a single task).
  */
-export function dockSlot(worker: string, slot = 0): { x: number; y: number } {
-  const d = dockPos(worker);
+export function dockSlot(
+  worker: string,
+  slot = 0,
+  pos?: { x: number; y: number },
+): { x: number; y: number } {
+  const d = dockPos(worker, pos);
   return {
     x: d.x + (DOCK_W - BEAD_W) / 2,
     y: d.y + DOCK_PAD + slot * (BEAD_H + DOCK_ROW_GAP),
@@ -220,8 +252,9 @@ export function dockSlotCentered(
   worker: string,
   slot: number,
   count: number,
+  pos?: { x: number; y: number },
 ): { x: number; y: number } {
-  const d = dockPos(worker);
+  const d = dockPos(worker, pos);
   const n = Math.max(1, count);
   const stackH = n * BEAD_H + (n - 1) * DOCK_ROW_GAP;
   const top = d.y + Math.max(DOCK_PAD, (DOCK_H - stackH) / 2);
@@ -274,25 +307,26 @@ export type SkillState = {
 
 /**
  * Avatar color per agent lane for the Agent Mail drawer. Workers get distinct
- * cool tones; the per-message capability chip carries the category color
- * separately (see CAP_COLORS).
+ * muted categorical tones; validator and improver carry their semantic colors
+ * (green pass / orange improve). The per-message capability chip carries the
+ * category color separately (see CAP_COLORS).
  */
 export const AGENT_COLORS: Record<string, string> = {
-  planner: "#a78bfa", // violet
-  coordinator: "#fbbf24", // amber
-  "worker-1": "#38bdf8",
-  "worker-2": "#22d3ee",
-  "worker-3": "#34d399",
-  "worker-4": "#f472b6",
-  validator: "#22c55e", // green
-  improver: "#fb7185", // rose
-  system: "#64748b",
-  all: "#64748b",
+  planner: "#9c84a8", // mauve
+  coordinator: "#a88a5c", // sand
+  "worker-1": "#7e8aa2", // slate
+  "worker-2": "#5e94a8", // teal
+  "worker-3": "#6f9e83", // sage
+  "worker-4": "#a77e86", // rosewood
+  validator: "#5ba372", // pass green
+  improver: "#ff8a3d", // accent-bright (closes the gaps)
+  system: "#6e6e73", // ink-dim
+  all: "#6e6e73",
 };
 
 export function agentColor(agent: string | undefined): string {
   if (agent && agent in AGENT_COLORS) return AGENT_COLORS[agent];
-  return "#64748b";
+  return "#6e6e73";
 }
 
 /**
