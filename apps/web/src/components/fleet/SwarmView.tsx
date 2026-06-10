@@ -52,7 +52,9 @@ export function SwarmView() {
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<string[]>([]);
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const [consoleTab, setConsoleTab] = useState<"console" | "history">("console");
+  const [consoleTab, setConsoleTab] = useState<"console" | "history" | "mail">("console");
+  // Live agent-to-agent coordination feed (the REAL Agent Mail the spawned swarm uses).
+  const [mail, setMail] = useState<{ id: number; from: string; subject: string; importance: string; ts: string }[]>([]);
   const [railOpen, setRailOpen] = useState(false);
   const [tasks, setTasks] = useState<
     Record<string, { subject?: string; description?: string; status?: string }>
@@ -106,6 +108,26 @@ export function SwarmView() {
   // survive the run ending and a page reload. Populated by the polls/reflection below.
   const run = useSwarmRun(conductor?.project);
   const swarms = useSwarms();
+
+  // Poll the real Agent Mail feed (mcp-agent-mail, via /api/agentmail) while the console is open,
+  // so you can watch the swarm assign + report work, the other half of the task list beads.
+  useEffect(() => {
+    if (!consoleOpen) return;
+    let alive = true;
+    const tick = () =>
+      fetch("/api/agentmail?limit=60", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d: { messages?: typeof mail }) => {
+          if (alive && d.messages) setMail(d.messages);
+        })
+        .catch(() => {});
+    void tick();
+    const id = setInterval(tick, 4000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [consoleOpen]);
 
   // --- Render-phase view-state resets -------------------------------------------------
   // Reset transient view state during render when the key it mirrors changes, rather than
@@ -886,6 +908,15 @@ export function SwarmView() {
                 >
                   history{Object.keys(run.beads).length ? ` (${Object.keys(run.beads).length})` : ""}
                 </button>
+                <span className="text-line">/</span>
+                <button
+                  type="button"
+                  onClick={() => setConsoleTab("mail")}
+                  className={`transition ${consoleTab === "mail" ? "text-accent" : "text-ink-dim hover:text-ink"}`}
+                  title="live agent-to-agent coordination, who assigned what to whom"
+                >
+                  mail{mail.length ? ` (${mail.length})` : ""}
+                </button>
               </div>
               <button
                 type="button"
@@ -918,6 +949,31 @@ export function SwarmView() {
                   className="mt-1.5 rounded-lg border border-line bg-canvas/70 px-2.5 py-1.5 text-xs text-ink outline-none placeholder:text-ink-dim focus:border-accent/60"
                 />
               </>
+            ) : consoleTab === "mail" ? (
+              <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-line bg-canvas/60 p-2 font-mono text-[10px] leading-relaxed">
+                {mail.length === 0 ? (
+                  <p className="text-ink-dim">
+                    no agent mail yet. When the spawned swarm coordinates (planner assigns, workers
+                    claim, the validator verifies) it streams here, live, the other half of the beads.
+                  </p>
+                ) : (
+                  mail.map((m) => (
+                    <div key={m.id} className="mb-1 border-b border-line/40 pb-1 last:border-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="shrink-0 tabular-nums text-ink-dim opacity-70">{m.ts.slice(11, 16)}</span>
+                        <span
+                          className={`min-w-0 truncate font-medium ${
+                            m.importance === "high" || m.importance === "urgent" ? "text-accent" : "text-ink-mid"
+                          }`}
+                        >
+                          {m.from}
+                        </span>
+                      </div>
+                      <div className="text-ink-mid">{m.subject}</div>
+                    </div>
+                  ))
+                )}
+              </div>
             ) : (
               <>
                 <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-line bg-canvas/60 p-2 font-mono text-[10px] leading-relaxed">
