@@ -455,21 +455,26 @@ export function SwarmView() {
     }
     const ev = (type: GlassboxEvent["type"], agent: string, extra: Partial<GlassboxEvent>) =>
       controller.apply({ ts: Date.now(), type, run_id: "mail", planner_version: 1, agent, ...extra } as GlassboxEvent);
-    // Newest ~24, oldest-first so beads dock in arrival order.
-    const recent = mail.slice(0, 24).reverse();
-    const newDetail: Record<string, { subject: string; description?: string }> = {};
-    for (const m of recent) {
-      const id = `mail-${m.id}`;
-      if (seenMailRef.current.has(id)) continue;
+    // ONE clean bead per node: its LATEST message (mail is newest-first, so the first hit wins).
+    // A bead-per-message overflowed the docks; this keeps each lane to a single chip. The full
+    // history stays in the mail tab. Clicking the bead always shows that node's latest message.
+    const latestByNode: Record<string, (typeof mail)[number]> = {};
+    for (const m of mail) {
       const node = roleByName[m.from] ?? roleOf(m.subject);
-      if (!node) continue;
-      seenMailRef.current.add(id);
-      const title = m.subject.length > 42 ? `${m.subject.slice(0, 42)}…` : m.subject;
+      if (node && !latestByNode[node]) latestByNode[node] = m;
+    }
+    const newDetail: Record<string, { subject: string; description?: string }> = {};
+    for (const [node, m] of Object.entries(latestByNode)) {
+      const id = `mail-${node}`;
+      // Keep the click-through detail fresh even though the chip itself is emitted once.
       newDetail[id] = { subject: `${m.from} (${node})`, description: m.subject };
+      if (seenMailRef.current.has(node)) continue;
+      seenMailRef.current.add(node);
+      const title = m.subject.length > 40 ? `${m.subject.slice(0, 40)}…` : m.subject;
       ev("bead_created", "planner", { bead_id: id, title, payload: { capability: "mail" } });
       ev("bead_claimed", node, { bead_id: id, title, payload: { capability: "mail" } });
     }
-    if (Object.keys(newDetail).length) setSubDetail((prev) => ({ ...prev, ...newDetail }));
+    setSubDetail((prev) => ({ ...prev, ...newDetail }));
   }, [mail]);
 
   // Light up the board's mapped nodes from their REAL spawned sessions' status (Phase B):
