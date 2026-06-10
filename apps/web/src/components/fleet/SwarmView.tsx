@@ -82,6 +82,7 @@ export function SwarmView() {
   const [loop, setLoop] = useState<LoopState | null>(null);
   const seenSubRef = useRef<Set<string>>(new Set());
   const prevSubCountRef = useRef(0);
+  const seenMailRef = useRef<Set<string>>(new Set());
   const searchParams = useSearchParams();
   // The floating header wraps on smaller screens (flex-wrap), so its height is not
   // fixed. Measure it and offset every floating panel (console, inspector, rail) and
@@ -429,6 +430,47 @@ export function SwarmView() {
     }
     prevSubCountRef.current = count;
   }, [conductor, conductor?.sub_agent_tasks, conductor?.sub_agent_count]);
+
+  // Reflect the swarm's Agent Mail onto the board: each message becomes a bead on its sender's
+  // lane (so the lanes fill from the REAL coordination, not just the Claude task list) and the
+  // sending node lights up. Agent-mail names are random (LilacFox), so infer each one's node from
+  // the role keywords the agents put in their own subjects ("WORKER-1 (WhiteCat)", "IMPROVER ...").
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!controller || !mail.length) return;
+    const roleOf = (s: string): string | null => {
+      const w = s.match(/worker[\s-]?([1-4])/i);
+      if (w) return `worker-${w[1]}`;
+      if (/\bvalidator\b/i.test(s)) return "validator";
+      if (/\bimprover\b/i.test(s)) return "improver";
+      if (/\bplanner\b|re-?plan/i.test(s)) return "planner";
+      if (/\bcoordinator\b|rout(e|ing|ed)\b/i.test(s)) return "coordinator";
+      return null;
+    };
+    // Build name -> node from every message that self-identifies a role, then apply to all.
+    const roleByName: Record<string, string> = {};
+    for (const m of mail) {
+      const r = roleOf(m.subject);
+      if (r) roleByName[m.from] = r;
+    }
+    const ev = (type: GlassboxEvent["type"], agent: string, extra: Partial<GlassboxEvent>) =>
+      controller.apply({ ts: Date.now(), type, run_id: "mail", planner_version: 1, agent, ...extra } as GlassboxEvent);
+    // Newest ~24, oldest-first so beads dock in arrival order.
+    const recent = mail.slice(0, 24).reverse();
+    const newDetail: Record<string, { subject: string; description?: string }> = {};
+    for (const m of recent) {
+      const id = `mail-${m.id}`;
+      if (seenMailRef.current.has(id)) continue;
+      const node = roleByName[m.from] ?? roleOf(m.subject);
+      if (!node) continue;
+      seenMailRef.current.add(id);
+      const title = m.subject.length > 42 ? `${m.subject.slice(0, 42)}…` : m.subject;
+      newDetail[id] = { subject: `${m.from} (${node})`, description: m.subject };
+      ev("bead_created", "planner", { bead_id: id, title, payload: { capability: "mail" } });
+      ev("bead_claimed", node, { bead_id: id, title, payload: { capability: "mail" } });
+    }
+    if (Object.keys(newDetail).length) setSubDetail((prev) => ({ ...prev, ...newDetail }));
+  }, [mail]);
 
   // Light up the board's mapped nodes from their REAL spawned sessions' status (Phase B):
   // once a node has a dedicated session, its lane reflects that session, not the task lanes.
