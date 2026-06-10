@@ -526,6 +526,15 @@ export function SwarmView() {
     }
   }, [run.roles, sessions]);
 
+  // Self-clean stale bookkeeping: drop any cached role/roster whose session is no longer alive, so
+  // a swarm killed outside the clean-up button can't leave a worker pointed at a dead session (and
+  // the hydrate above can't re-light a lane from it). Guarded on a non-empty poll to avoid wiping
+  // everything on a transient empty fetch.
+  useEffect(() => {
+    if (!sessions.length) return;
+    swarmCache.pruneToLive(new Set(sessions.map((s) => s.session_id)));
+  }, [sessions]);
+
   // Poll the durable swarm logs for this project from Redis (server-side, shared across tabs,
   // survives teardown + reload). This is the source of truth; localStorage is just a cache.
   // Polling (not one-shot) so a result the conductor records mid-run shows up live, no reload.
@@ -785,6 +794,7 @@ export function SwarmView() {
     setNodeSessions({});
     setWorkerLines([]);
     swarmCache.removeSwarm(conductor.session_id); // workers are gone; drop the roster (logs persist in Redis)
+    swarmCache.clearRoles(conductor.project); // and the role map, so no worker stays pointed at a session
     swarmCache.log(project, { kind: "note", text: `swarm torn down: ${entries.map(([n]) => n).join(", ")} (logs saved)` });
     setNote(`cleaned up ${entries.length} session(s), logs saved`);
   }, [conductor, nodeSessions, sessions]);

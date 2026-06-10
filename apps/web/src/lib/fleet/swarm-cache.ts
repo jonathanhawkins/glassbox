@@ -188,6 +188,45 @@ export const swarmCache = {
   getSwarms(): Rosters {
     return rosters;
   },
+  // Wipe the node-role map for a project. Called on teardown so a killed swarm cannot leave a
+  // worker pointed at a session id that outlives the kill (and re-lights that lane on the board).
+  clearRoles(project: string) {
+    const run = state[project];
+    if (!run || !Object.keys(run.roles).length) return;
+    state = { ...state, [project]: { ...run, roles: {}, updatedAt: Date.now() } };
+    emit();
+  },
+  // Drop any role mapping or roster entry whose session is no longer alive, so a swarm killed
+  // OUTSIDE the clean-up button (a process exit, an external kill) self-cleans instead of leaving
+  // a stale worker->session mapping on the board.
+  pruneToLive(liveSids: Set<string>) {
+    let changed = false;
+    const nextState = { ...state };
+    for (const [project, run] of Object.entries(state)) {
+      const roles = Object.fromEntries(Object.entries(run.roles).filter(([sid]) => liveSids.has(sid)));
+      if (Object.keys(roles).length !== Object.keys(run.roles).length) {
+        nextState[project] = { ...run, roles };
+        changed = true;
+      }
+    }
+    const nextRosters = { ...rosters };
+    for (const [cid, sw] of Object.entries(rosters)) {
+      if (!liveSids.has(sw.conductor)) {
+        delete nextRosters[cid];
+        changed = true;
+        continue;
+      }
+      const nodes = Object.fromEntries(Object.entries(sw.nodes).filter(([, sid]) => liveSids.has(sid)));
+      if (Object.keys(nodes).length !== Object.keys(sw.nodes).length) {
+        nextRosters[cid] = { ...sw, nodes };
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    state = nextState;
+    rosters = nextRosters;
+    emit();
+  },
   clear(project: string) {
     if (!state[project]) return;
     const next = { ...state };
