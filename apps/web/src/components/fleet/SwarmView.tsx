@@ -431,48 +431,54 @@ export function SwarmView() {
     prevSubCountRef.current = count;
   }, [conductor, conductor?.sub_agent_tasks, conductor?.sub_agent_count]);
 
-  // Reflect the swarm's Agent Mail onto the board: each message becomes a bead on its sender's
-  // lane (so the lanes fill from the REAL coordination, not just the Claude task list) and the
-  // sending node lights up. Agent-mail names are random (LilacFox), so infer each one's node from
-  // the role keywords the agents put in their own subjects ("WORKER-1 (WhiteCat)", "IMPROVER ...").
+  // Reflect the swarm's Agent Mail onto the WORKER lanes (the only nodes with task docks): one
+  // bead per worker = its latest message. When that message reports completion ("done", "PASS",
+  // "verified", ...), the bead flows OFF the worker to the done rail and the worker goes idle, so
+  // finished work clears instead of piling on the lane. The full feed stays in the mail tab.
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller || !mail.length) return;
-    const roleOf = (s: string): string | null => {
+    // Only worker-1..4 have docks. planner/coordinator/validator/improver coordinate via the mail
+    // tab; a bead "claimed" by them has nowhere to land and spills onto a worker lane, so skip them.
+    const workerOf = (s: string): string | null => {
       const w = s.match(/worker[\s-]?([1-4])/i);
-      if (w) return `worker-${w[1]}`;
-      if (/\bvalidator\b/i.test(s)) return "validator";
-      if (/\bimprover\b/i.test(s)) return "improver";
-      if (/\bplanner\b|re-?plan/i.test(s)) return "planner";
-      if (/\bcoordinator\b|rout(e|ing|ed)\b/i.test(s)) return "coordinator";
-      return null;
+      return w ? `worker-${w[1]}` : null;
     };
-    // Build name -> node from every message that self-identifies a role, then apply to all.
-    const roleByName: Record<string, string> = {};
+    const nameToWorker: Record<string, string> = {};
     for (const m of mail) {
-      const r = roleOf(m.subject);
-      if (r) roleByName[m.from] = r;
+      const w = workerOf(m.subject);
+      if (w) nameToWorker[m.from] = w;
     }
+    // A message that reports completion -> the bead is done and leaves the worker.
+    const isDone = (s: string) =>
+      /✓/.test(s) || /\b(done|completed?|verified|pass(?:ed|es)?|green|landed|shipped|merged|resolved)\b/i.test(s);
+    // A swarm-wide validation pass ("build PASS", validator green) means the goal is met, so every
+    // worker bead settles to the done rail. This is the cleanest "it's finished" signal and is what
+    // the user means by "once they are validated".
+    const validated = mail.some((m) =>
+      /\bvalidator pass\b|\bbuild pass\b|\bbuild exit 0\b|\bgreen:\b|perf goal.*met/i.test(m.subject),
+    );
     const ev = (type: GlassboxEvent["type"], agent: string, extra: Partial<GlassboxEvent>) =>
       controller.apply({ ts: Date.now(), type, run_id: "mail", planner_version: 1, agent, ...extra } as GlassboxEvent);
-    // ONE clean bead per node: its LATEST message (mail is newest-first, so the first hit wins).
-    // A bead-per-message overflowed the docks; this keeps each lane to a single chip. The full
-    // history stays in the mail tab. Clicking the bead always shows that node's latest message.
-    const latestByNode: Record<string, (typeof mail)[number]> = {};
+    // Latest message per worker (mail is newest-first, so the first hit wins).
+    const latest: Record<string, (typeof mail)[number]> = {};
     for (const m of mail) {
-      const node = roleByName[m.from] ?? roleOf(m.subject);
-      if (node && !latestByNode[node]) latestByNode[node] = m;
+      const w = nameToWorker[m.from] ?? workerOf(m.subject);
+      if (w && !latest[w]) latest[w] = m;
     }
     const newDetail: Record<string, { subject: string; description?: string }> = {};
-    for (const [node, m] of Object.entries(latestByNode)) {
-      const id = `mail-${node}`;
-      // Keep the click-through detail fresh even though the chip itself is emitted once.
-      newDetail[id] = { subject: `${m.from} (${node})`, description: m.subject };
-      if (seenMailRef.current.has(node)) continue;
-      seenMailRef.current.add(node);
+    for (const [worker, m] of Object.entries(latest)) {
+      const id = `mail-${worker}`;
+      const done = validated || isDone(m.subject);
+      newDetail[id] = { subject: `${m.from} (${worker})`, description: m.subject };
+      // Re-emit only when the worker's done/working state changes, so done work animates off once.
+      const stateKey = `${worker}:${done ? "done" : "work"}`;
+      if (seenMailRef.current.has(stateKey)) continue;
+      seenMailRef.current.add(stateKey);
       const title = m.subject.length > 40 ? `${m.subject.slice(0, 40)}…` : m.subject;
       ev("bead_created", "planner", { bead_id: id, title, payload: { capability: "mail" } });
-      ev("bead_claimed", node, { bead_id: id, title, payload: { capability: "mail" } });
+      ev("bead_claimed", worker, { bead_id: id, title, payload: { capability: "mail" } });
+      if (done) ev("bead_done", worker, { bead_id: id, title, payload: { capability: "mail" } });
     }
     setSubDetail((prev) => ({ ...prev, ...newDetail }));
   }, [mail]);
