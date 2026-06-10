@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { pollWhileVisible } from "@/lib/cockpit/pollWhileVisible";
 import { defaultGoalFor, type TaskName } from "@/lib/cockpit/tasks";
 
 type Phase = "idle" | "running" | "paused";
@@ -57,10 +58,13 @@ export function ControlPanel({
       }
     };
     tick();
-    const id = setInterval(tick, 1500);
+    // Visibility-aware recurring poll: pause the 1.5s /api/status tick while the
+    // tab is hidden (a backgrounded cockpit should not keep hitting the bridge)
+    // and catch up immediately on return. Matches every other poller in the app.
+    const stop = pollWhileVisible(tick, 1500);
     return () => {
       alive = false;
-      clearInterval(id);
+      stop();
     };
   }, []);
 

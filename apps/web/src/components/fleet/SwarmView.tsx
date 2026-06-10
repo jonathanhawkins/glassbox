@@ -212,9 +212,14 @@ export function SwarmView() {
   // Stop any running loop when leaving the swarm view.
   useEffect(() => () => loopRef.current?.stop(), []);
 
-  // Stream the conductor's terminal into the console.
+  // Stream the conductor's terminal into the console, but only while the console is open:
+  // `lines` is rendered nowhere else, so streaming it (a live WS + a setLines re-render of
+  // this whole view per terminal frame) while the panel is collapsed is pure waste. The
+  // bridge pushes the full terminal buffer on subscribe (terminal_content is a snapshot, and
+  // setLines replaces wholesale), so reopening the console repaints the current state with no
+  // lost history. Same gate as the Agent Mail poll above.
   useEffect(() => {
-    if (!conductorId) return; // lines are cleared during render when conductorId changes
+    if (!conductorId || !consoleOpen) return; // lines are cleared during render when conductorId changes
     let cancelled = false;
     let cleanup: (() => void) | undefined;
     void openTerminalStream(conductorId, (ls) => {
@@ -229,7 +234,7 @@ export function SwarmView() {
       cancelled = true;
       cleanup?.();
     };
-  }, [conductorId]);
+  }, [conductorId, consoleOpen]);
 
   // Pin the conductor stream to the newest line, and jump to the bottom when it opens.
   useEffect(() => {
@@ -1069,8 +1074,11 @@ export function SwarmView() {
                           {run.log
                             .slice()
                             .reverse()
-                            .map((e, i) => (
-                              <div key={i} className="flex gap-1.5 text-ink-dim">
+                            .map((e) => (
+                              <div
+                                key={`${e.ts}-${e.kind}-${e.text}`}
+                                className="flex gap-1.5 text-ink-dim"
+                              >
                                 <span className="shrink-0 tabular-nums opacity-70">{fmtTime(e.ts)}</span>
                                 <span className="min-w-0 flex-1 truncate" title={e.text}>
                                   {e.kind === "done" ? "✓ " : e.kind === "spawn" ? "▸ " : ""}

@@ -190,7 +190,10 @@ export function DebugClient() {
             ) : (
               events.map((ev, i) => (
                 <li
-                  key={`${ev.ts}-${i}`}
+                  // Events are prepended, so the array index shifts on every arrival; key on the
+                  // event's own (stable) fields instead so already-rendered rows keep their key.
+                  // i is the final tiebreaker for the rare same-ms/same-agent/same-bead collision.
+                  key={`${ev.ts}-${ev.type}-${ev.agent}-${ev.bead_id ?? ""}-${i}`}
                   className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 p-2"
                 >
                   <span className="text-zinc-500">{fmtTime(ev.ts)}</span>
