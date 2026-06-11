@@ -3,10 +3,26 @@
 // worker's output for a LOOP_DONE sentinel (it self-reports + verifies) -> continue, or
 // stop on done / a round budget / the user. Phase 2 moves this server-side with a cron
 // trigger and a pluggable agentic validator; the contract here stays the same.
+//
+// Note on imports: the real I/O seams (./client, ./ws) and the pure kernel (./loop-core) are
+// pulled in lazily via dynamic import() rather than static, extensionless imports. That keeps
+// this module loadable by Node's built-in test runner (which cannot resolve extensionless
+// relative specifiers): a test injects fake deps, so the real ./client + ./ws are never
+// imported under test. The bundler (Next) resolves the dynamic specifiers normally in prod.
 
-import { sendCommand } from "./client";
-import { openTerminalStream, stripAnsi } from "./ws";
+import type { sendCommand as sendCommandReal } from "./client";
+import type { openTerminalStream as openTerminalStreamReal } from "./ws";
 import type { Archetype } from "@/lib/fleet/archetypes";
+
+// The two I/O seams the loop drives, factored out so a test can inject fakes. Both default to
+// the real voxherd client + ws implementations, so production callers pass no deps.
+type SendCommandFn = typeof sendCommandReal;
+type OpenTerminalStreamFn = typeof openTerminalStreamReal;
+
+export interface LoopDeps {
+  sendCommand?: SendCommandFn;
+  openTerminalStream?: OpenTerminalStreamFn;
+}
 
 export interface LoopState {
   running: boolean;
@@ -23,16 +39,17 @@ export interface LoopHandle {
   stop: () => void;
 }
 
-const DONE_TOKEN = "LOOP_DONE";
-
-export function startArchetypeLoop(opts: {
-  session: { project: string; session_id: string };
-  archetype: Archetype;
-  goal: string;
-  workers?: number;
-  maxRounds?: number;
-  onState: (s: LoopState) => void;
-}): LoopHandle {
+export function startArchetypeLoop(
+  opts: {
+    session: { project: string; session_id: string };
+    archetype: Archetype;
+    goal: string;
+    workers?: number;
+    maxRounds?: number;
+    onState: (s: LoopState) => void;
+  },
+  deps?: LoopDeps,
+): LoopHandle {
   const { session, archetype, goal, onState } = opts;
   const workers = opts.workers ?? 4;
   const maxRounds = opts.maxRounds ?? 8;
@@ -61,62 +78,62 @@ export function startArchetypeLoop(opts: {
     emit(reason);
   };
 
-  const stepPrompt = (n: number): string => {
-    const head = n === 1 ? archetype.kickoff(goal) : `Continue toward the goal: ${goal}.`;
-    return (
-      `${head}\n\nUse up to ${workers} sub-agents working in parallel this round. This is round ` +
-      `${n} of an automated ${archetype.name} loop. When the goal is fully met and verified, end ` +
-      `your reply with the exact token ${DONE_TOKEN}. If work remains, end with LOOP_CONTINUE and ` +
-      `a one-line note on what is left.`
+  // Bootstrap: resolve the pure kernel + the I/O seams (injected fakes, or the real
+  // ./client + ./ws via dynamic import), then open the stream and run the first round.
+  // This mirrors the original openStream().then(...) flow; the only addition is awaiting
+  // the lazily-imported modules first. Behavior (state emissions, ordering) is unchanged.
+  void (async () => {
+    const { buildStepPrompt, hasDoneToken } = await import("./loop-core.ts");
+    const send: SendCommandFn =
+      deps?.sendCommand ?? (await import("./client.ts")).sendCommand;
+    const openStream: OpenTerminalStreamFn =
+      deps?.openTerminalStream ?? (await import("./ws.ts")).openTerminalStream;
+
+    const runRound = async () => {
+      if (stopped) return;
+      round += 1;
+      if (round > maxRounds) {
+        finish("max rounds");
+        return;
+      }
+      recent = [];
+      awaitingStop = true;
+      emit();
+      const r = await send({
+        project: session.project,
+        session_id: session.session_id,
+        message: buildStepPrompt(archetype, goal, round, workers),
+      });
+      if (!r.ok) finish(`send failed: ${r.error ?? "?"}`);
+    };
+
+    const onStop = (summary: string) => {
+      if (stopped || !awaitingStop) return;
+      awaitingStop = false;
+      lastSummary = summary;
+      // recent holds RAW (ANSI-laden) lines from the stream; hasDoneToken strips escapes before
+      // the sentinel scan so an embedded color code can't split or hide the LOOP_DONE token.
+      if (hasDoneToken(recent, summary)) {
+        finish("done");
+        return;
+      }
+      emit();
+      void runRound();
+    };
+
+    const fn = await openStream(
+      session.session_id,
+      (lines) => {
+        recent = lines;
+      },
+      onStop,
     );
-  };
-
-  const runRound = async () => {
-    if (stopped) return;
-    round += 1;
-    if (round > maxRounds) {
-      finish("max rounds");
-      return;
-    }
-    recent = [];
-    awaitingStop = true;
-    emit();
-    const r = await sendCommand({
-      project: session.project,
-      session_id: session.session_id,
-      message: stepPrompt(round),
-    });
-    if (!r.ok) finish(`send failed: ${r.error ?? "?"}`);
-  };
-
-  const onStop = (summary: string) => {
-    if (stopped || !awaitingStop) return;
-    awaitingStop = false;
-    lastSummary = summary;
-    // recent now holds RAW (ANSI-laden) lines from the stream; strip escapes before the
-    // sentinel scan so an embedded color code can't split or hide the LOOP_DONE token.
-    const text = `${recent.map(stripAnsi).join("\n")}\n${summary}`.toUpperCase();
-    if (text.includes(DONE_TOKEN)) {
-      finish("done");
-      return;
-    }
-    emit();
-    void runRound();
-  };
-
-  void openTerminalStream(
-    session.session_id,
-    (lines) => {
-      recent = lines;
-    },
-    onStop,
-  ).then((fn) => {
     if (stopped) fn();
     else {
       cleanup = fn;
       void runRound();
     }
-  });
+  })();
 
   return { stop: () => finish("stopped") };
 }
