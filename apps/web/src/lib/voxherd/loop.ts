@@ -13,6 +13,8 @@ export interface LoopState {
   round: number;
   maxRounds: number;
   archetype: string;
+  /** Canonical loop-shape id (contract "archetypes"), for the board overlay. */
+  archetypeId: string;
   lastSummary: string;
   reason: string; // "" while running, else done | max rounds | stopped | <error>
 }
@@ -47,6 +49,7 @@ export function startArchetypeLoop(opts: {
       round,
       maxRounds,
       archetype: archetype.name,
+      archetypeId: archetype.id,
       lastSummary,
       reason,
     });

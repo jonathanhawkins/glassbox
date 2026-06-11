@@ -189,7 +189,7 @@ const LOOP_ARROW = "rgba(255,106,26,0.60)";
 const EDGE_DASH = "3 6";
 const EDGE_W = 2;
 
-export function RoutingEdges() {
+export function RoutingEdges({ hideLoop = false }: { hideLoop?: boolean } = {}) {
   const arc = feedbackArc();
   return (
     <svg
@@ -227,16 +227,21 @@ export function RoutingEdges() {
       </defs>
 
       {/* The improver -> planner self-improvement loop, arcing over the band, with
-          a direction arrow at its apex pointing back toward the planner. */}
-      <path
-        d={arc.d}
-        fill="none"
-        stroke="rgba(255,106,26,0.28)"
-        strokeWidth={EDGE_W}
-        strokeLinecap="round"
-        strokeDasharray="2 9"
-      />
-      <ArrowHead x={arc.apex.x} y={arc.apex.y} angle={arc.angle} color={LOOP_ARROW} />
+          a direction arrow at its apex pointing back toward the planner. Hidden when
+          an active loop shape draws its own return edge (the overlay owns the loop). */}
+      {!hideLoop && (
+        <>
+          <path
+            d={arc.d}
+            fill="none"
+            stroke="rgba(255,106,26,0.28)"
+            strokeWidth={EDGE_W}
+            strokeLinecap="round"
+            strokeDasharray="2 9"
+          />
+          <ArrowHead x={arc.apex.x} y={arc.apex.y} angle={arc.angle} color={LOOP_ARROW} />
+        </>
+      )}
 
       {/* Short horizontal pipeline hops at the ends (planner->coordinator,
           validator->improver), edge-to-edge through the gap between cards. */}

@@ -87,6 +87,18 @@ const clampNum = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi
 /** Round-robin worker pool the coordinator routes to (mirrors agents/coordinator). */
 const WORKER_POOL = ["worker-1", "worker-2", "worker-3", "worker-4"];
 
+/**
+ * How an active loop shape redraws the board: lane-role relabels (e.g. the
+ * validator reads "judge: pick the winner" during a race) and whether the
+ * workers fan into the centered column so attempts read as parallel lanes.
+ * The fleet's per-shape specs (lib/fleet/loop-shapes.ts) provide these; the
+ * controller stays archetype-agnostic.
+ */
+export type BoardLoopShape = {
+  roles?: Record<string, string>;
+  column?: boolean;
+} | null;
+
 /** Shorten a beads_rust id (e.g. "weavehacks4-sd0" -> "sd0") for the chip label. */
 function shortId(beadId: string): string {
   const dash = beadId.lastIndexOf("-");
@@ -131,6 +143,8 @@ export class BoardController {
   // come only from explicit agent_status events fed from live session/sub-agent data. The
   // original simulated cockpit never enables this, so it is unchanged.
   private realMode = false;
+  // The active loop shape's board treatment (role relabels + column layout).
+  private loopShape: BoardLoopShape = null;
   private workerResetTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Per-bead "land it" timers. animateShape's final settle goes through the
   // lock-respecting update path, so a locked bead never gets snapped exactly onto
@@ -267,7 +281,7 @@ export class BoardController {
               w: LANE_W,
               h: LANE_H,
               agent,
-              role: AGENT_ROLES[agent] ?? "",
+              role: this.roleOf(agent),
               status: "idle",
             },
           });
@@ -493,10 +507,47 @@ export class BoardController {
 
   setActiveWorkers(n: number) {
     this.activeWorkers = Math.max(1, Math.min(WORKER_POOL.length, Math.floor(n) || 1));
-    // Fewer than all workers -> a centered column (so the middle worker is straight on the
-    // spine); all four -> the original 2x2 grid.
+    this.refreshWorkerLayout();
+  }
+
+  /**
+   * Redraw the board for a loop shape: relabel the lanes whose role reads
+   * differently under this loop (the validator becomes "judge: pick the winner"
+   * during a race) and, when the shape asks for it, fan the workers into the
+   * centered column so competing attempts read as parallel lanes converging on
+   * the judge. Pass null to restore the default board.
+   */
+  setLoopShape(shape: BoardLoopShape) {
+    this.loopShape = shape;
+    for (const agent of this.agentShapeId.keys()) this.applyRole(agent);
+    this.refreshWorkerLayout();
+  }
+
+  /** The role line under an agent's name, honoring the active loop shape. */
+  private roleOf(agent: string): string {
+    return this.loopShape?.roles?.[agent] ?? AGENT_ROLES[agent] ?? "";
+  }
+
+  private applyRole(agent: string) {
+    const id = this.agentShapeId.get(agent);
+    if (!id) return;
+    const role = this.roleOf(agent);
+    const shape = this.editor.getShape(id) as AgentShape | undefined;
+    if (!shape || shape.props.role === role) return;
+    this.editor.run(
+      () =>
+        this.editor.updateShape<AgentShape>({ id, type: "agent", props: { role } }),
+      { ignoreShapeLock: true },
+    );
+  }
+
+  // Fewer than all workers (or a loop shape that wants parallel lanes) -> a centered
+  // column (so the middle worker is straight on the spine); all four -> the 2x2 grid.
+  private refreshWorkerLayout() {
     this.workerPos =
-      this.activeWorkers < WORKER_POOL.length ? this.computeColumn(this.activeWorkers) : null;
+      this.activeWorkers < WORKER_POOL.length || this.loopShape?.column
+        ? this.computeColumn(this.activeWorkers)
+        : null;
     this.arrangeWorkers();
     this.computeFrameBounds();
     this.frameCamera();

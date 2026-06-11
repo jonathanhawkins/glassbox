@@ -23,7 +23,12 @@ const SwarmBoard = dynamic(() => import("@/components/fleet/SwarmBoard").then((m
 import { ArchetypeRail } from "@/components/fleet/ArchetypeRail";
 import { SkillsMenu } from "@/components/fleet/SkillsMenu";
 import { AnsiLines } from "@/components/fleet/AnsiLines";
+import {
+  LoopShapeContext,
+  type LoopShapeStatus,
+} from "@/components/fleet/loop-shape-context";
 import type { Archetype } from "@/lib/fleet/archetypes";
+import { LOOP_SHAPES } from "@/lib/fleet/loop-shapes";
 import type { SkillPackage } from "@/lib/skillvault/client";
 import { swarmCache, useSwarmRun, useSwarms } from "@/lib/fleet/swarm-cache";
 import { useSessions } from "@/lib/voxherd/useSessions";
@@ -80,6 +85,11 @@ export function SwarmView() {
   const controllerRef = useRef<BoardController | null>(null);
   const loopRef = useRef<LoopHandle | null>(null);
   const [loop, setLoop] = useState<LoopState | null>(null);
+  // The active loop shape (contract archetype id): drives the board's return-edge
+  // overlay and the lane relabels. Kept after the loop ends so the end chip
+  // (landed, plateau, winner picked) stays readable; replaced on the next Run.
+  const [loopShapeId, setLoopShapeId] = useState<string | null>(null);
+  const loopShapeIdRef = useRef<string | null>(null);
   const seenSubRef = useRef<Set<string>>(new Set());
   const prevSubCountRef = useRef(0);
   const seenMailRef = useRef<Set<string>>(new Set());
@@ -630,6 +640,10 @@ export function SwarmView() {
     controllerRef.current = controller;
     controller.setCopilotOpen(consoleOpenRef.current);
     controller.setRailOpen(railOpenRef.current);
+    // Re-apply the active loop shape after a board remount (conductor switch),
+    // so the lane relabels + race column survive the new controller.
+    const spec = loopShapeIdRef.current ? LOOP_SHAPES[loopShapeIdRef.current] : undefined;
+    if (spec) controller.setLoopShape({ roles: spec.roles, column: spec.column });
   }, []);
 
   const sendToConductor = useCallback(
@@ -653,6 +667,14 @@ export function SwarmView() {
     (a: Archetype, goal: string) => {
       if (!conductor || !goal.trim()) return;
       loopRef.current?.stop();
+      // Redraw the graph for this loop shape: its return edge (overlay), its lane
+      // relabels, and the race's parallel-lane column (controller).
+      setLoopShapeId(a.id);
+      loopShapeIdRef.current = a.id;
+      const spec = LOOP_SHAPES[a.id];
+      controllerRef.current?.setLoopShape(
+        spec ? { roles: spec.roles, column: spec.column } : null,
+      );
       setNote(`running ${a.name} loop on ${conductor.project}…`);
       swarmCache.log(conductor.project, { kind: "note", text: `${a.name} loop started: ${goal.trim()}` });
       loopRef.current = startArchetypeLoop({
@@ -843,19 +865,37 @@ export function SwarmView() {
     pickedWorker && nodeSessions[pickedWorker] && sessions.some((s) => s.session_id === nodeSessions[pickedWorker]),
   );
 
+  // Live loop-shape status for the board overlay (the return edge + gauge):
+  // which shape is active, where the loop stands, and the task counts that feed
+  // the sweep/dig gauges. Provided via context because tldraw's OnTheCanvas
+  // slot (SwarmRoutingEdges) takes no props.
+  const loopStatus = useMemo<LoopShapeStatus>(
+    () => ({
+      id: loopShapeId,
+      running: loop?.running ?? false,
+      round: loop?.round ?? 0,
+      maxRounds: loop?.maxRounds ?? 0,
+      reason: loop?.reason ?? "",
+      counts,
+    }),
+    [loopShapeId, loop, counts],
+  );
+
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-canvas text-ink-mid">
       {/* Full-bleed board */}
       <div className="absolute inset-0">
         {conductor ? (
-          <SwarmBoard
-            key={conductor.session_id}
-            sessionId={conductor.session_id}
-            project={conductor.project}
-            onReady={onBoardReady}
-            onEvent={onBoardEvent}
-            workers={workers}
-          />
+          <LoopShapeContext.Provider value={loopStatus}>
+            <SwarmBoard
+              key={conductor.session_id}
+              sessionId={conductor.session_id}
+              project={conductor.project}
+              onReady={onBoardReady}
+              onEvent={onBoardEvent}
+              workers={workers}
+            />
+          </LoopShapeContext.Provider>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-ink-dim">
             pick a conductor session above to see its live swarm.
@@ -1260,7 +1300,7 @@ export function SwarmView() {
             className={`absolute right-3 z-20 rounded-lg border bg-raised/80 px-2.5 py-2 font-mono text-[11px] uppercase tracking-wider text-accent backdrop-blur transition hover:text-ink ${
               realGoal.trim() ? "border-accent/50 ring-1 ring-accent/20" : "border-line"
             }`}
-            title="show loop archetypes + skills"
+            title="show loop shapes + skills"
           >
             loops + skills &#10216;
           </button>

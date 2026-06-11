@@ -3,7 +3,7 @@
 // The skills menu: give a worker a capability from skillvault. Lists skill packages
 // (search), and "Give" tells the worker to install + use that package's SKILL.md files
 // (the worker has shell access, so it does the install itself). The "database of options
-// for workers" surface, next to the loop archetypes. It fills the rail's remaining height
+// for workers" surface, next to the loop shapes. It fills the rail's remaining height
 // so the list grows with the window (responsive) and scrolls internally, instead of a
 // fixed-height box that hid most of the catalog.
 

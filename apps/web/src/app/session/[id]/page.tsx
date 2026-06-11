@@ -9,7 +9,7 @@ export async function generateMetadata({
   const { id } = await params;
   return {
     title: `Glassbox . Session ${id}`,
-    description: "One session's live console, loop archetypes, and skills.",
+    description: "One session's live console, loop shapes, and skills.",
   };
 }
 

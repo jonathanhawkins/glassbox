@@ -1,6 +1,6 @@
 "use client";
 
-// One session's detail: console on the left (terminal + command box), the loop-archetype
+// One session's detail: console on the left (terminal + command box), the loop-shapes
 // rail on the right (and the skillvault skills menu + tldraw board next). This is the
 // "click the chat -> the worker view + how-to-loop on the right" surface.
 
@@ -431,7 +431,7 @@ export function SessionDetail() {
           </div>
         </main>
 
-        {/* Right: loop archetypes (and the skills menu + board mount next) */}
+        {/* Right: loop shapes (and the skills menu + board mount next) */}
         <aside className="flex w-[360px] shrink-0 flex-col overflow-hidden border-l border-line p-4">
           {loop && (
             <div className="mb-3 rounded-lg border border-accent/40 bg-accent/10 p-2">

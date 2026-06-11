@@ -1,8 +1,9 @@
 "use client";
 
-// The loop-archetype rail: pick a loop pattern to run on this worker. Teaches what each
-// loop is (tagline + when-to-use) and fires it via a kickoff prompt. This is the "use
-// the archetypes to know what loops you can do" surface.
+// The loop-shapes rail: pick a loop shape to run on this worker. Teaches what each
+// loop is (tagline + when-to-use + stop condition) and fires it via a kickoff prompt.
+// "Shapes" is literal: the board draws a different return edge per shape, so the rail
+// name and the graph teach the same idea.
 
 import { useState } from "react";
 
@@ -35,10 +36,10 @@ export function ArchetypeRail({
           <CollapseButton
             open={sectionOpen}
             onClick={() => setSectionOpen((o) => !o)}
-            label="loop archetypes"
+            label="loop shapes"
           />
           <span className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-dim">
-            loop archetypes
+            loop shapes
           </span>
         </div>
         <span className="text-[10px] text-ink-dim">what loop should this worker run?</span>
@@ -82,14 +83,18 @@ export function ArchetypeRail({
               </button>
             </div>
             {open === a.id && (
-              <p className="mt-1 text-[11px] text-ink-dim">When to use: {a.whenToUse}</p>
+              <div className="mt-1 space-y-0.5 text-[11px] text-ink-dim">
+                <p>When to use: {a.whenToUse}</p>
+                <p>This loop {a.stop}.</p>
+              </div>
             )}
           </div>
         ))}
       </div>
       <p className="mt-2 text-[10px] text-ink-dim">
         Run drives the loop on the conductor: decompose into tasks &rarr; dispatch to sub-agents
-        &rarr; the coordinator verifies &rarr; repeat until the archetype&apos;s stop condition.
+        &rarr; the coordinator verifies &rarr; repeat until the shape&apos;s stop condition. The
+        board redraws the return edge to match.
       </p>
         </>
       )}
