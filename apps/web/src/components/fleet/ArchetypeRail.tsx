@@ -14,15 +14,19 @@ export function ArchetypeRail({
   onRun,
   disabled,
   goal: goalProp,
+  defaultOpen = true,
 }: {
   onRun: (a: Archetype, goal: string) => void;
   disabled?: boolean;
   // When provided, the rail is controlled by a shared goal (header) and hides its own input.
   goal?: string;
+  // Start the shapes list collapsed where the rail shares space with other panels (the swarm
+  // rail puts the activity log below it, so loop shapes folds away to give the log room).
+  defaultOpen?: boolean;
 }) {
   const [goalState, setGoalState] = useState("");
   const [open, setOpen] = useState("");
-  const [sectionOpen, setSectionOpen] = useState(true);
+  const [sectionOpen, setSectionOpen] = useState(defaultOpen);
   const controlled = goalProp !== undefined;
   const goal = controlled ? goalProp : goalState;
   // Once a goal exists the rail comes alive: the Run buttons light up so it is obvious you can

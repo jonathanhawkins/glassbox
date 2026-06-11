@@ -24,7 +24,7 @@ export interface CachedBead {
 
 export interface LogEntry {
   ts: number;
-  kind: "spawn" | "done" | "skill" | "note";
+  kind: "spawn" | "done" | "skill" | "note" | "loop";
   text: string;
   agent?: string;
   beadId?: string;

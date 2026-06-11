@@ -23,6 +23,7 @@ const SwarmBoard = dynamic(() => import("@/components/fleet/SwarmBoard").then((m
 import { ArchetypeRail } from "@/components/fleet/ArchetypeRail";
 import { SkillsMenu } from "@/components/fleet/SkillsMenu";
 import { AnsiLines } from "@/components/fleet/AnsiLines";
+import { ActivityFeed, type ActivityEntry } from "@/components/fleet/ActivityFeed";
 import {
   LoopShapeContext,
   type LoopShapeStatus,
@@ -90,6 +91,11 @@ export function SwarmView() {
   // (landed, plateau, winner picked) stays readable; replaced on the next Run.
   const [loopShapeId, setLoopShapeId] = useState<string | null>(null);
   const loopShapeIdRef = useRef<string | null>(null);
+  // The activity log derives the loop's round/finish beats from the loop snapshot, which keeps
+  // no history of its own. These track what we have already logged so a re-emit of the same
+  // round (the kernel emits on every terminal frame) does not double-log. Reset in runSwarm.
+  const lastLoggedRoundRef = useRef(0);
+  const loggedFinishRef = useRef(false);
   const seenSubRef = useRef<Set<string>>(new Set());
   const prevSubCountRef = useRef(0);
   const seenMailRef = useRef<Set<string>>(new Set());
@@ -120,10 +126,11 @@ export function SwarmView() {
   const run = useSwarmRun(conductor?.project);
   const swarms = useSwarms();
 
-  // Poll the real Agent Mail feed (mcp-agent-mail, via /api/agentmail) while the console is open,
-  // so you can watch the swarm assign + report work, the other half of the task list beads.
+  // Poll the real Agent Mail feed (mcp-agent-mail, via /api/agentmail) while the console OR the
+  // rail is open, so both the mail tab and the activity log can watch the swarm assign + report
+  // work, the other half of the task list beads.
   useEffect(() => {
-    if (!consoleOpen) return;
+    if (!consoleOpen && !railOpen) return;
     let alive = true;
     const tick = () =>
       fetch("/api/agentmail?limit=60", { cache: "no-store" })
@@ -138,7 +145,7 @@ export function SwarmView() {
       alive = false;
       clearInterval(id);
     };
-  }, [consoleOpen]);
+  }, [consoleOpen, railOpen]);
 
   // --- Render-phase view-state resets -------------------------------------------------
   // Reset transient view state during render when the key it mirrors changes, rather than
@@ -691,6 +698,11 @@ export function SwarmView() {
       // Redraw the graph for this loop shape: its return edge (overlay), its lane
       // relabels, and the race's parallel-lane column (the loopShapeId effect).
       setLoopShapeId(a.id);
+      // Fresh loop: re-arm the activity log's round/finish dedup, and open the rail so the
+      // log is visible as the run happens (the whole point of watching it).
+      lastLoggedRoundRef.current = 0;
+      loggedFinishRef.current = false;
+      setRailOpen(true);
       setNote(`running ${a.name} loop on ${conductor.project}…`);
       swarmCache.log(conductor.project, { kind: "note", text: `${a.name} loop started: ${goal.trim()}` });
       loopRef.current = startArchetypeLoop({
@@ -855,6 +867,26 @@ export function SwarmView() {
     }
   }, [loop?.reason, loop?.running, nodeSessions, teardownSwarm]);
 
+  // Record the loop's round-by-round and finish beats into the persisted run log, so the
+  // activity feed shows the loop stepping (and where it stopped) interleaved with the agent
+  // work. The loop snapshot carries no history, so log each new round once and the finish once
+  // (swarmCache.log itself also dedups consecutive repeats).
+  useEffect(() => {
+    const project = conductor?.project;
+    if (!loop || !project) return;
+    if (loop.running && loop.round > lastLoggedRoundRef.current) {
+      lastLoggedRoundRef.current = loop.round;
+      swarmCache.log(project, {
+        kind: "loop",
+        text: `${loop.archetype} loop round ${loop.round}/${loop.maxRounds}`,
+      });
+    }
+    if (!loop.running && loop.reason && !loggedFinishRef.current) {
+      loggedFinishRef.current = true;
+      swarmCache.log(project, { kind: "loop", text: `${loop.archetype} loop ${loop.reason}` });
+    }
+  }, [loop, conductor?.project]);
+
   // Unified bead detail: prefer the live task/sub-agent data, fall back to the local cache so
   // a clicked bead still shows what that agent did AFTER the run and across reloads.
   const pid = picked?.id ?? "";
@@ -896,6 +928,55 @@ export function SwarmView() {
     }),
     [loopShapeId, loop, counts],
   );
+
+  // The activity log: normalize the swarm's two persistent live sources into one chronological
+  // stream (newest first). The run log already carries the conductor's sub-agent dispatches and
+  // completions (auto-logged on bead transitions) plus the loop/skill lifecycle; the agent mail
+  // carries the inter-agent coordination. Together: "what is going on with all the agents and
+  // the mail". Capped so a long run stays light. This is the board's temporal companion.
+  const activity = useMemo<ActivityEntry[]>(() => {
+    const out: ActivityEntry[] = [];
+    run.log.forEach((e, i) => {
+      const kind: ActivityEntry["kind"] =
+        e.kind === "loop" ? "loop" : e.kind === "spawn" || e.kind === "done" ? "agent" : "run";
+      const actor =
+        e.agent ?? (e.kind === "loop" ? "loop" : e.kind === "skill" ? "skills" : "swarm");
+      out.push({
+        id: `log-${e.ts}-${i}`,
+        ts: e.ts,
+        actor,
+        text: e.text,
+        kind,
+        // Live beats earn the accent: a worker just dispatched, or the loop stepping a round.
+        accent: e.kind === "spawn" || (e.kind === "loop" && e.text.includes("round")),
+        beadId: e.beadId,
+      });
+    });
+    for (const m of mail) {
+      const w = m.subject.match(/worker[\s-]?([1-4])/i) ?? m.from.match(/worker[\s-]?([1-4])/i);
+      out.push({
+        id: `mail-${m.id}`,
+        ts: Date.parse(m.ts) || 0,
+        actor: m.from,
+        text: m.subject,
+        kind: "mail",
+        accent: m.importance === "high" || m.importance === "urgent",
+        agent: w ? `worker-${w[1]}` : undefined,
+      });
+    }
+    out.sort((a, b) => b.ts - a.ts);
+    return out.slice(0, 80);
+  }, [run.log, mail]);
+
+  // A click on an activity row jumps to its subject: a bead opens the inspector (same path as
+  // the history tab), an agent (a worker named in a mail) opens its lane inspector.
+  const onSelectActivity = useCallback((e: ActivityEntry) => {
+    if (e.beadId) setPicked({ id: e.beadId, x: 360, y: 160 });
+    else if (e.agent) {
+      setConsoleOpen(true);
+      setPickedWorker(e.agent);
+    }
+  }, []);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-canvas text-ink-mid">
@@ -1249,9 +1330,6 @@ export function SwarmView() {
                   {swarmLogs[pickedWorker].preview}
                 </pre>
               )}
-              <div className="font-mono text-[9px] text-ink-dim">
-                kept in Redis, survives teardown and reload
-              </div>
             </div>
           ) : (
             <div className="min-h-0 flex-1 space-y-2 overflow-auto">
@@ -1303,8 +1381,28 @@ export function SwarmView() {
                 &#10217;
               </button>
             </div>
-            <ArchetypeRail onRun={runSwarm} disabled={!conductor} goal={realGoal} />
-            <div className="mt-5 flex min-h-0 flex-1 flex-col border-t border-line pt-3">
+            <ArchetypeRail onRun={runSwarm} disabled={!conductor} goal={realGoal} defaultOpen={false} />
+            {/* Activity log: the swarm's running narrative (sub-agent dispatches + completions,
+                agent mail, the loop stepping), newest first. The temporal companion to the
+                board, so it gets the prime space in the rail. */}
+            <div className="mt-4 flex min-h-0 flex-[3] flex-col border-t border-line pt-3">
+              <div className="mb-1.5 flex shrink-0 items-center justify-between">
+                <span className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-dim">
+                  activity
+                </span>
+                <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-dim">
+                  {loop?.running && (
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-accent"
+                      style={{ animation: "gb-pulse 1.1s ease-in-out infinite" }}
+                    />
+                  )}
+                  {activity.length || ""}
+                </span>
+              </div>
+              <ActivityFeed entries={activity} onSelect={onSelectActivity} />
+            </div>
+            <div className="mt-4 flex min-h-0 flex-[2] flex-col border-t border-line pt-3">
               <SkillsMenu onGive={giveSkill} disabled={!conductor} />
             </div>
           </aside>
@@ -1313,12 +1411,18 @@ export function SwarmView() {
             type="button"
             onClick={() => setRailOpen(true)}
             style={{ top: panelTop }}
-            className={`absolute right-3 z-20 rounded-lg border bg-raised/80 px-2.5 py-2 font-mono text-[11px] uppercase tracking-wider text-accent backdrop-blur transition hover:text-ink ${
-              realGoal.trim() ? "border-accent/50 ring-1 ring-accent/20" : "border-line"
+            className={`absolute right-3 z-20 flex items-center gap-1.5 rounded-lg border bg-raised/80 px-2.5 py-2 font-mono text-[11px] uppercase tracking-wider text-accent backdrop-blur transition hover:text-ink ${
+              realGoal.trim() || loop?.running ? "border-accent/50 ring-1 ring-accent/20" : "border-line"
             }`}
-            title="show loop shapes + skills"
+            title="show the activity log, loop shapes + skills"
           >
-            loops + skills &#10216;
+            {loop?.running && (
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-accent"
+                style={{ animation: "gb-pulse 1.1s ease-in-out infinite" }}
+              />
+            )}
+            activity + loops &#10216;
           </button>
         ))}
 
