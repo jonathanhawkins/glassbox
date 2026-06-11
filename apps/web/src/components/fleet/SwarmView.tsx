@@ -100,7 +100,6 @@ export function SwarmView() {
   const loggedFinishRef = useRef(false);
   const seenSubRef = useRef<Set<string>>(new Set());
   const prevSubCountRef = useRef(0);
-  const seenMailRef = useRef<Set<string>>(new Set());
   const searchParams = useSearchParams();
   // The floating header wraps on smaller screens (flex-wrap), so its height is not
   // fixed. Measure it and offset every floating panel (console, inspector, rail) and
@@ -476,15 +475,15 @@ export function SwarmView() {
     prevSubCountRef.current = count;
   }, [conductor, conductor?.sub_agent_tasks, conductor?.sub_agent_count]);
 
-  // Reflect the swarm's Agent Mail onto the WORKER lanes (the only nodes with task docks): one
-  // bead per worker = its latest message. When that message reports completion ("done", "PASS",
-  // "verified", ...), the bead flows OFF the worker to the done rail and the worker goes idle, so
-  // finished work clears instead of piling on the lane. The full feed stays in the mail tab.
+  // Reflect the swarm's Agent Mail onto the lanes as a per-node COUNT BADGE, not as free beads.
+  // The old approach dropped one bead per worker and flowed the "done" ones into the validator's
+  // done rail, where they piled up and overlapped. Now the activity log carries the message text,
+  // so the board only needs to show WHERE coordination is happening: a small "mail N" chip on each
+  // worker lane, tallied from the recent mail (a sender's lane is learned from any message that
+  // names a worker, so that sender's other messages count toward the same lane).
   useEffect(() => {
     const controller = controllerRef.current;
-    if (!controller || !mail.length) return;
-    // Only worker-1..4 have docks. planner/coordinator/validator/improver coordinate via the mail
-    // tab; a bead "claimed" by them has nowhere to land and spills onto a worker lane, so skip them.
+    if (!controller) return;
     const workerOf = (s: string): string | null => {
       const w = s.match(/worker[\s-]?([1-4])/i);
       return w ? `worker-${w[1]}` : null;
@@ -494,38 +493,15 @@ export function SwarmView() {
       const w = workerOf(m.subject);
       if (w) nameToWorker[m.from] = w;
     }
-    // A message that reports completion -> the bead is done and leaves the worker.
-    const isDone = (s: string) =>
-      /✓/.test(s) || /\b(done|completed?|verified|pass(?:ed|es)?|green|landed|shipped|merged|resolved)\b/i.test(s);
-    // A swarm-wide validation pass ("build PASS", validator green) means the goal is met, so every
-    // worker bead settles to the done rail. This is the cleanest "it's finished" signal and is what
-    // the user means by "once they are validated".
-    const validated = mail.some((m) =>
-      /\bvalidator pass\b|\bbuild pass\b|\bbuild exit 0\b|\bgreen:\b|perf goal.*met/i.test(m.subject),
-    );
-    const ev = (type: GlassboxEvent["type"], agent: string, extra: Partial<GlassboxEvent>) =>
-      controller.apply({ ts: Date.now(), type, run_id: "mail", planner_version: 1, agent, ...extra } as GlassboxEvent);
-    // Latest message per worker (mail is newest-first, so the first hit wins).
-    const latest: Record<string, (typeof mail)[number]> = {};
+    const counts: Record<string, number> = {};
     for (const m of mail) {
       const w = nameToWorker[m.from] ?? workerOf(m.subject);
-      if (w && !latest[w]) latest[w] = m;
+      if (w) counts[w] = (counts[w] ?? 0) + 1;
     }
-    const newDetail: Record<string, { subject: string; description?: string }> = {};
-    for (const [worker, m] of Object.entries(latest)) {
-      const id = `mail-${worker}`;
-      const done = validated || isDone(m.subject);
-      newDetail[id] = { subject: `${m.from} (${worker})`, description: m.subject };
-      // Re-emit only when the worker's done/working state changes, so done work animates off once.
-      const stateKey = `${worker}:${done ? "done" : "work"}`;
-      if (seenMailRef.current.has(stateKey)) continue;
-      seenMailRef.current.add(stateKey);
-      const title = m.subject.length > 40 ? `${m.subject.slice(0, 40)}…` : m.subject;
-      ev("bead_created", "planner", { bead_id: id, title, payload: { capability: "mail" } });
-      ev("bead_claimed", worker, { bead_id: id, title, payload: { capability: "mail" } });
-      if (done) ev("bead_done", worker, { bead_id: id, title, payload: { capability: "mail" } });
+    for (let i = 1; i <= 4; i += 1) {
+      const worker = `worker-${i}`;
+      controller.setMailCount(worker, counts[worker] ?? 0);
     }
-    setSubDetail((prev) => ({ ...prev, ...newDetail }));
   }, [mail]);
 
   // Light up the board's mapped nodes from their REAL spawned sessions' status (Phase B):

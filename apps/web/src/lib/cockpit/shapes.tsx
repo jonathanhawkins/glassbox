@@ -42,6 +42,7 @@ declare module "@tldraw/tlschema" {
       agent: string;
       role: string;
       status: string;
+      mail: number;
     };
     dock: {
       w: number;
@@ -71,6 +72,8 @@ export type AgentShape = TLBaseShape<
     agent: string;
     role: string;
     status: string;
+    /** Count of recent agent-mail involving this node, shown as a small badge. */
+    mail: number;
   }
 >;
 
@@ -83,10 +86,11 @@ export class AgentShapeUtil extends BaseBoxShapeUtil<AgentShape> {
     agent: T.string,
     role: T.string,
     status: T.string,
+    mail: T.number,
   };
 
   override getDefaultProps(): AgentShape["props"] {
-    return { w: LANE_W, h: LANE_H, agent: "agent", role: "", status: "idle" };
+    return { w: LANE_W, h: LANE_H, agent: "agent", role: "", status: "idle", mail: 0 };
   }
 
   // Read-only visualization: never selectable / editable / resizable by users.
@@ -118,7 +122,7 @@ export class AgentShapeUtil extends BaseBoxShapeUtil<AgentShape> {
   }
 
   override component(shape: AgentShape) {
-    const { agent, role, status, w, h } = shape.props;
+    const { agent, role, status, mail, w, h } = shape.props;
     const light = STATUS_COLORS[status as keyof typeof STATUS_COLORS] ?? "#6e6e73";
     const isWorking = status === "working";
     const roleLabel = role || AGENT_ROLES[agent] || "";
@@ -182,6 +186,28 @@ export class AgentShapeUtil extends BaseBoxShapeUtil<AgentShape> {
             >
               {agent}
             </span>
+            {mail > 0 && (
+              <span
+                title={`${mail} agent mail`}
+                style={{
+                  marginLeft: "auto",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                  padding: "1px 6px",
+                  borderRadius: 999,
+                  fontSize: 9,
+                  fontWeight: 600,
+                  letterSpacing: 0.3,
+                  color: "#ff8a3d",
+                  background: "rgba(255,106,26,0.12)",
+                  border: "1px solid rgba(255,106,26,0.35)",
+                  flex: "0 0 auto",
+                }}
+              >
+                ✉ {mail}
+              </span>
+            )}
           </div>
           <div
             style={{

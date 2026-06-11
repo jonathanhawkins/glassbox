@@ -283,6 +283,7 @@ export class BoardController {
               agent,
               role: this.roleOf(agent),
               status: "idle",
+              mail: 0,
             },
           });
         }
@@ -494,6 +495,22 @@ export class BoardController {
 
   private setAllAgents(status: string) {
     for (const agent of this.agentShapeId.keys()) this.setAgentStatus(agent, status);
+  }
+
+  /**
+   * Set the agent lane's mail-count badge. This replaces the old free-floating mail beads
+   * (which piled up in the validator's done rail): coordination stays visible on the graph as
+   * a small "mail N" chip on the node, while the message text lives in the activity log.
+   */
+  setMailCount(agent: string, n: number) {
+    const id = this.agentShapeId.get(agent);
+    if (!id) return;
+    const shape = this.editor.getShape(id) as AgentShape | undefined;
+    if (!shape || shape.props.mail === n) return;
+    this.editor.run(
+      () => this.editor.updateShape<AgentShape>({ id, type: "agent", props: { mail: n } }),
+      { ignoreShapeLock: true },
+    );
   }
 
   /**
