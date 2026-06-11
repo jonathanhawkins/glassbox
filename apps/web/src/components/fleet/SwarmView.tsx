@@ -24,6 +24,7 @@ import { ArchetypeRail } from "@/components/fleet/ArchetypeRail";
 import { SkillsMenu } from "@/components/fleet/SkillsMenu";
 import { AnsiLines } from "@/components/fleet/AnsiLines";
 import { ActivityFeed, type ActivityEntry } from "@/components/fleet/ActivityFeed";
+import { CollapseButton } from "@/components/cockpit/CollapseButton";
 import {
   LoopShapeContext,
   type LoopShapeStatus,
@@ -62,6 +63,7 @@ export function SwarmView() {
   // Live agent-to-agent coordination feed (the REAL Agent Mail the spawned swarm uses).
   const [mail, setMail] = useState<{ id: number; from: string; subject: string; importance: string; ts: string }[]>([]);
   const [railOpen, setRailOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(true);
   const [tasks, setTasks] = useState<
     Record<string, { subject?: string; description?: string; status?: string }>
   >({});
@@ -1385,11 +1387,22 @@ export function SwarmView() {
             {/* Activity log: the swarm's running narrative (sub-agent dispatches + completions,
                 agent mail, the loop stepping), newest first. The temporal companion to the
                 board, so it gets the prime space in the rail. */}
-            <div className="mt-4 flex min-h-0 flex-[3] flex-col border-t border-line pt-3">
-              <div className="mb-1.5 flex shrink-0 items-center justify-between">
-                <span className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-dim">
-                  activity
-                </span>
+            <div
+              className={`mt-4 flex flex-col border-t border-line pt-3 ${
+                activityOpen ? "min-h-0 flex-[3]" : "shrink-0"
+              }`}
+            >
+              <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <CollapseButton
+                    open={activityOpen}
+                    onClick={() => setActivityOpen((o) => !o)}
+                    label="activity"
+                  />
+                  <span className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-dim">
+                    activity
+                  </span>
+                </div>
                 <span className="flex items-center gap-1.5 font-mono text-[10px] text-ink-dim">
                   {loop?.running && (
                     <span
@@ -1400,7 +1413,7 @@ export function SwarmView() {
                   {activity.length || ""}
                 </span>
               </div>
-              <ActivityFeed entries={activity} onSelect={onSelectActivity} />
+              {activityOpen && <ActivityFeed entries={activity} onSelect={onSelectActivity} />}
             </div>
             <div className="mt-4 flex min-h-0 flex-[2] flex-col border-t border-line pt-3">
               <SkillsMenu onGive={giveSkill} disabled={!conductor} />
