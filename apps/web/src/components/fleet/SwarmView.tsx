@@ -156,6 +156,16 @@ export function SwarmView() {
     setConductorId(wanted);
   }
 
+  // Deep-link: /swarm?shape=<id> pre-arms a loop shape so its return edge, lane
+  // relabels, and (for race) the parallel-lane column render without running a
+  // loop. The demo's "show every shape" surface; running a loop replaces it.
+  // Render only sets state (same self-limiting pattern as ?session=); the
+  // controller side effect runs in the loopShapeId effect below.
+  const wantedShape = searchParams?.get("shape") ?? "";
+  if (wantedShape && !loopShapeId && wantedShape in LOOP_SHAPES) {
+    setLoopShapeId(wantedShape);
+  }
+
   const [prevConductorId, setPrevConductorId] = useState(conductorId);
   if (prevConductorId !== conductorId) {
     setPrevConductorId(conductorId);
@@ -221,6 +231,17 @@ export function SwarmView() {
 
   // Stop any running loop when leaving the swarm view.
   useEffect(() => () => loopRef.current?.stop(), []);
+
+  // Apply the active loop shape's board treatment (lane relabels + the race
+  // column) whenever it changes, and keep the remount ref in sync so
+  // onBoardReady can re-apply it after a conductor switch rebuilds the board.
+  useEffect(() => {
+    loopShapeIdRef.current = loopShapeId;
+    const spec = loopShapeId ? LOOP_SHAPES[loopShapeId] : undefined;
+    controllerRef.current?.setLoopShape(
+      spec ? { roles: spec.roles, column: spec.column } : null,
+    );
+  }, [loopShapeId]);
 
   // Stream the conductor's terminal into the console, but only while the console is open:
   // `lines` is rendered nowhere else, so streaming it (a live WS + a setLines re-render of
@@ -668,13 +689,8 @@ export function SwarmView() {
       if (!conductor || !goal.trim()) return;
       loopRef.current?.stop();
       // Redraw the graph for this loop shape: its return edge (overlay), its lane
-      // relabels, and the race's parallel-lane column (controller).
+      // relabels, and the race's parallel-lane column (the loopShapeId effect).
       setLoopShapeId(a.id);
-      loopShapeIdRef.current = a.id;
-      const spec = LOOP_SHAPES[a.id];
-      controllerRef.current?.setLoopShape(
-        spec ? { roles: spec.roles, column: spec.column } : null,
-      );
       setNote(`running ${a.name} loop on ${conductor.project}…`);
       swarmCache.log(conductor.project, { kind: "note", text: `${a.name} loop started: ${goal.trim()}` });
       loopRef.current = startArchetypeLoop({
