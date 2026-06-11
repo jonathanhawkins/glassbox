@@ -79,30 +79,36 @@ export function ActivityFeed({
     );
   }
 
+  // Rows stay on one line and the container scrolls on BOTH axes, so a long line (a mail
+  // subject, a recorded result) is read by scrolling right instead of being ellipsized. The
+  // inner w-max wrapper sizes to the widest row so every row is the same width (hover spans
+  // the full line) and min-w-full keeps it filling the panel when the content is short.
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pr-1 font-mono text-[10px] leading-relaxed">
-      {entries.map((e) => {
-        const clickable = Boolean(onSelect && (e.beadId || e.agent));
-        return (
-          <button
-            key={e.id}
-            type="button"
-            disabled={!clickable}
-            onClick={() => onSelect?.(e)}
-            title={e.text}
-            className={`flex w-full items-baseline gap-1.5 rounded px-1 py-0.5 text-left transition ${
-              clickable ? "cursor-pointer hover:bg-raised/70" : "cursor-default"
-            }`}
-          >
-            <span className="w-7 shrink-0 tabular-nums text-ink-dim opacity-70">{ago(now, e.ts)}</span>
-            <span className="shrink-0" style={{ color: e.accent ? ACCENT : agentColor(e.actor) }}>
-              {KIND_MARK[e.kind]}
-            </span>
-            <span className={`shrink-0 ${e.accent ? "text-accent" : "text-ink-mid"}`}>{e.actor}</span>
-            <span className="min-w-0 flex-1 truncate text-ink-dim">{e.text}</span>
-          </button>
-        );
-      })}
+    <div className="min-h-0 flex-1 overflow-auto pr-1 font-mono text-[10px] leading-relaxed">
+      <div className="flex w-max min-w-full flex-col gap-0.5">
+        {entries.map((e) => {
+          const clickable = Boolean(onSelect && (e.beadId || e.agent));
+          return (
+            <button
+              key={e.id}
+              type="button"
+              disabled={!clickable}
+              onClick={() => onSelect?.(e)}
+              title={e.text}
+              className={`flex w-full items-baseline gap-1.5 whitespace-nowrap rounded px-1 py-0.5 text-left transition ${
+                clickable ? "cursor-pointer hover:bg-raised/70" : "cursor-default"
+              }`}
+            >
+              <span className="w-7 shrink-0 tabular-nums text-ink-dim opacity-70">{ago(now, e.ts)}</span>
+              <span className="shrink-0" style={{ color: e.accent ? ACCENT : agentColor(e.actor) }}>
+                {KIND_MARK[e.kind]}
+              </span>
+              <span className={`shrink-0 ${e.accent ? "text-accent" : "text-ink-mid"}`}>{e.actor}</span>
+              <span className="shrink-0 text-ink-dim">{e.text}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
