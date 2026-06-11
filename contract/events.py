@@ -26,6 +26,7 @@ RUN_META_PREFIX: str = REDIS["runMetaPrefix"]
 EVENT_TYPES: set[str] = set(_CONTRACT["eventTypes"])
 AGENT_STATUS: list[str] = _CONTRACT["agentStatus"]
 AGENTS: list[str] = _CONTRACT["agents"]
+ARCHETYPES: list[str] = _CONTRACT["archetypes"]
 
 DEFAULT_TASK = "perf_takehome"
 
@@ -64,6 +65,7 @@ def make_event(
     bead_id: Optional[str] = None,
     title: str = "",
     payload: Optional[dict[str, Any]] = None,
+    archetype: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build a canonical Glassbox event envelope.
 
@@ -71,9 +73,14 @@ def make_event(
     share ``glassbox:events``) but leaderboards and the cockpit board are per-task,
     so every envelope carries the task it belongs to and the cockpit drops events
     that do not match its active task.
+
+    ``archetype`` names the loop shape this run executes (one of ``ARCHETYPES``),
+    carried on run_started so the board can draw the matching return edge.
     """
     if type not in EVENT_TYPES:
         raise ValueError(f"unknown event type: {type!r} (allowed: {sorted(EVENT_TYPES)})")
+    if archetype is not None and archetype not in ARCHETYPES:
+        raise ValueError(f"unknown archetype: {archetype!r} (allowed: {ARCHETYPES})")
     return {
         "ts": int(time.time() * 1000),
         "type": type,
@@ -84,4 +91,5 @@ def make_event(
         "bead_id": bead_id,
         "title": title,
         "payload": payload or {},
+        "archetype": archetype,
     }

@@ -242,6 +242,8 @@ def run_cycle(
         agent="system",
         title=goal,
         payload={"allowed_caps": allowed_list},
+        # The self-improving cycle is a climb loop: push accuracy while it improves.
+        archetype="climb",
     )
     bus.set_agent_status(run_id, "coordinator", "working", planner_version=planner_version)
 
@@ -574,6 +576,7 @@ def optimize_loop(
     bus.emit_type(
         "run_started", f"{base}-r1", planner_version=1, agent="system", title=goal,
         payload={"mode": "optimize", "metric": best_metric, "baseline_metric": best_metric},
+        archetype="climb",
     )
 
     tried: list[dict[str, Any]] = []
@@ -769,6 +772,7 @@ def run_cycle_live(
         agent="system",
         title=goal,
         payload={"mode": "live", "start_caps": start_caps, "gap": to_inject},
+        archetype="climb",
     )
     bus.set_agent_status(
         run_id, "coordinator", "working", planner_version=planner_version

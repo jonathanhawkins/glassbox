@@ -32,6 +32,16 @@
     "log"
   ],
   "agentStatus": ["idle", "working", "done", "failed"],
+  "archetypes": [
+    "land",
+    "climb",
+    "hold",
+    "watch",
+    "burst",
+    "sweep",
+    "dig",
+    "race"
+  ],
   "agents": [
     "planner",
     "coordinator",

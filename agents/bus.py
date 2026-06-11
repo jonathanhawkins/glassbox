@@ -108,6 +108,7 @@ def emit_type(
     bead_id: Optional[str] = None,
     title: str = "",
     payload: Optional[dict[str, Any]] = None,
+    archetype: Optional[str] = None,
 ) -> str:
     """Build a canonical event with make_event and emit it. Returns entry id.
 
@@ -124,6 +125,7 @@ def emit_type(
         bead_id=bead_id,
         title=title,
         payload=payload,
+        archetype=archetype,
     )
     return emit(event)
 
