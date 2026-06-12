@@ -457,7 +457,7 @@ function Loops() {
           style={{
             position: "absolute",
             left: 110,
-            top: 880,
+            top: 868,
             fontFamily: MONO,
             fontSize: 26,
             color: T.inkMid,
@@ -465,6 +465,10 @@ function Loops() {
           }}
         >
           the cockpit detects the stop condition and lands the swarm itself.
+          <div style={{ marginTop: 12, fontSize: 23, color: T.inkDim }}>
+            metrics live on a Redis leaderboard. every grade is a Weave Evaluation in Weights &amp;
+            Biases.
+          </div>
         </div>
       </AbsoluteFill>
     </SceneShell>
@@ -621,11 +625,13 @@ function ActivityLine({ text, delay }: { text: string; delay: number }) {
 }
 
 // --- scene 6: close -----------------------------------------------------------------------
+const STACK = ["Claude Code swarms", "Redis live bus", "Weights & Biases Weave"];
+
 function Close() {
   const frame = useCurrentFrame();
   const a = useRise(8);
   const b = useRise(30);
-  const c = useRise(52);
+  const c = useRise(68);
   const underline = interpolate(frame, [18, 58], [0, 360], { ...clamp, easing: EASE });
   return (
     <SceneShell duration={CLOSE_END - BOARD_END}>
@@ -647,12 +653,38 @@ function Close() {
           <div style={{ ...b, fontFamily: MONO, fontSize: 32, color: T.inkMid }}>
             real sessions · real coordination · real stops
           </div>
-          <div style={{ ...c, marginTop: 22, fontFamily: MONO, fontSize: 24, color: T.inkDim }}>
-            born at WeaveHacks · graded by a hard oracle · logged to Weave
+          <div style={{ display: "flex", gap: 18, justifyContent: "center", marginTop: 34 }}>
+            {STACK.map((s, i) => (
+              <StackPill key={s} text={s} delay={44 + i * 9} />
+            ))}
+          </div>
+          <div style={{ ...c, marginTop: 30, fontFamily: MONO, fontSize: 24, color: T.inkDim }}>
+            born at WeaveHacks, a Weights &amp; Biases hackathon · graded by a hard oracle
           </div>
         </div>
       </AbsoluteFill>
     </SceneShell>
+  );
+}
+
+function StackPill({ text, delay }: { text: string; delay: number }) {
+  const rise = useRise(delay, 16);
+  return (
+    <span
+      style={{
+        ...rise,
+        display: "inline-block",
+        fontFamily: MONO,
+        fontSize: 25,
+        padding: "10px 22px",
+        borderRadius: 999,
+        border: `1.5px solid ${T.line}`,
+        background: T.raised,
+        color: T.ink,
+      }}
+    >
+      {text}
+    </span>
   );
 }
 
