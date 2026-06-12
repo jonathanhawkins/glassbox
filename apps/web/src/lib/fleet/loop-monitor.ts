@@ -51,23 +51,34 @@ export interface ClimbState {
   best: number;
   /** The metric improved past its baseline at least once (so a flat/maxed metric never plateaus). */
   climbed: boolean;
-  /** Consecutive readings with no improvement AFTER the metric had climbed. */
+  /** Time-spaced no-improvement windows accumulated AFTER the metric had climbed. */
   stallStreak: number;
+  /** When the current no-improvement window opened (epoch ms; anchors the spacing). */
+  windowTs: number;
   /** "" while still climbing, "plateau" once the metric has stalled. */
   reason: string;
 }
 
-/** Readings with no improvement (each ~ one leaderboard poll) before a climb counts as plateaued. */
+/** No-improvement windows before a climb counts as plateaued. */
 export const CLIMB_STALL_STREAK = 3;
 
+/**
+ * Minimum spacing between counted stalls. The cockpit feeds the monitor on every counts/metric
+ * poll (~2-3s apart), but a real swarm needs MINUTES between harness evals; counting raw polls
+ * would declare a plateau seconds after the first improvement. Time-spacing makes the unit "a
+ * minute with no improvement", so plateau = CLIMB_STALL_STREAK minutes of genuine stagnation.
+ */
+export const CLIMB_STALL_SPACING_MS = 60_000;
+
 export function initClimb(): ClimbState {
-  return { best: NaN, climbed: false, stallStreak: 0, reason: "" };
+  return { best: NaN, climbed: false, stallStreak: 0, windowTs: NaN, reason: "" };
 }
 
 /** One leaderboard observation feeding the Climb monitor. `metric` is null when no reading yet. */
 export interface ClimbObservation {
   shapeId: string | null; // the armed shape
   metric: number | null; // the live metric (e.g. best accuracy, or best wall_ms)
+  ts: number; // observation time (epoch ms) anchoring the stall spacing
 }
 
 /**
@@ -75,10 +86,11 @@ export interface ClimbObservation {
  *
  * `higherIsBetter` is true for a metric you maximize (accuracy) and false for one you minimize
  * (wall_ms / latency). The FIRST reading is the baseline (not a climb). A genuine improvement past
- * the baseline records a new best and resets the stall. Once the metric has climbed at least once,
- * readings with no improvement accumulate a stall; SUSTAINED no-improvement (debounced) is a
- * plateau -> reason "plateau". A flat or already-maxed metric never plateaus (it never climbed),
- * so the loop falls back to the conductor rather than stopping on a non-result.
+ * the baseline records a new best and resets the stall clock. Once the metric has climbed at least
+ * once, every CLIMB_STALL_SPACING_MS that passes without an improvement counts one stall;
+ * CLIMB_STALL_STREAK of those is a plateau -> reason "plateau". A flat or already-maxed metric
+ * never plateaus (it never climbed), so the loop falls back to the conductor rather than stopping
+ * on a non-result.
  */
 export function stepClimb(
   prev: ClimbState,
@@ -88,13 +100,19 @@ export function stepClimb(
   if (obs.shapeId !== "climb" || obs.metric == null || Number.isNaN(obs.metric)) return prev;
   const m = obs.metric;
   if (Number.isNaN(prev.best)) {
-    return { best: m, climbed: false, stallStreak: 0, reason: "" }; // baseline reading
+    return { best: m, climbed: false, stallStreak: 0, windowTs: obs.ts, reason: "" }; // baseline
   }
   const better = higherIsBetter ? m > prev.best : m < prev.best;
   if (better) {
-    return { best: m, climbed: true, stallStreak: 0, reason: "" }; // climbed
+    return { best: m, climbed: true, stallStreak: 0, windowTs: obs.ts, reason: "" }; // climbed
   }
   if (!prev.climbed) return prev; // never improved past the baseline: keep waiting, not a plateau
+  if (!(obs.ts - prev.windowTs >= CLIMB_STALL_SPACING_MS)) return prev; // window still open
   const stallStreak = prev.stallStreak + 1;
-  return { ...prev, stallStreak, reason: stallStreak >= CLIMB_STALL_STREAK ? "plateau" : prev.reason };
+  return {
+    ...prev,
+    stallStreak,
+    windowTs: obs.ts,
+    reason: stallStreak >= CLIMB_STALL_STREAK ? "plateau" : prev.reason,
+  };
 }

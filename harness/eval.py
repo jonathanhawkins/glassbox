@@ -52,6 +52,40 @@ def _update_leaderboard(task_name: str, planner_version: int, accuracy: float) -
         return False
 
 
+def _update_meta(task_name: str, planner_version: int, accuracy: float, wall_ms: int) -> bool:
+    """Mirror per-version detail (wall_ms) into the planner-meta hash. Best-effort.
+
+    The cockpit leaderboard route reads wall_ms from glassbox:planner_meta:{task}; the live
+    validator writes it via agents.bus.set_planner_meta, so a CLI grade must too or a perf
+    Climb has no metric. Same merge semantics as the bus writer: read the existing JSON row,
+    merge, write back, never blanking another writer's fields.
+    """
+    if wall_ms <= 0:
+        return False
+    try:
+        import redis as redis_lib
+
+        from contract.events import planner_meta_key
+
+        url = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+        r = redis_lib.from_url(url, decode_responses=True)
+        key = planner_meta_key(task_name)
+        field = str(int(planner_version))
+        record: dict = {}
+        raw = r.hget(key, field)
+        if raw:
+            try:
+                record = json.loads(raw)
+            except (TypeError, ValueError):
+                record = {}
+        record.update({"version": int(planner_version), "accuracy": float(accuracy), "wall_ms": int(wall_ms)})
+        r.hset(key, field, json.dumps(record))
+        return True
+    except Exception as exc:  # noqa: BLE001 - meta is best-effort, same as the leaderboard
+        print(f"[redis] meta update skipped: {exc}", file=sys.stderr)
+        return False
+
+
 def _emit_rewrite_event(
     task_name: str, run_id: str, planner_version: int, accuracy: float
 ) -> None:
@@ -109,6 +143,7 @@ def evaluate(
     accuracy = float(result.score)
     logged = weave_eval.log_planner_eval(task_name, planner_version, result)
     leaderboard_updated = _update_leaderboard(task_name, planner_version, accuracy)
+    _update_meta(task_name, planner_version, accuracy, int(getattr(result, "wall_ms", 0) or 0))
     if emit_event and run_id:
         _emit_rewrite_event(task_name, run_id, planner_version, accuracy)
 

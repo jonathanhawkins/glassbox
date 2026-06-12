@@ -8,6 +8,7 @@ import {
   initClimb,
   stepClimb,
   CLIMB_STALL_STREAK,
+  CLIMB_STALL_SPACING_MS,
   type SweepState,
   type ClimbState,
 } from "./loop-monitor.ts";
@@ -113,9 +114,13 @@ test("stepSweep is pure: it never mutates the input state", () => {
 // --- Climb monitor: stop when the metric plateaus -------------------------------------------
 
 // Drive a sequence of metric readings through the Climb monitor and return the final state.
+// Readings are spaced one full stall window apart, so each flat reading is one countable stall
+// (the spacing itself is pinned separately below).
 function climb(metrics: (number | null)[], higherIsBetter = true, shapeId = "climb"): ClimbState {
   let s = initClimb();
-  for (const m of metrics) s = stepClimb(s, { shapeId, metric: m }, higherIsBetter);
+  metrics.forEach((m, i) => {
+    s = stepClimb(s, { shapeId, metric: m, ts: (i + 1) * CLIMB_STALL_SPACING_MS }, higherIsBetter);
+  });
   return s;
 }
 
@@ -173,9 +178,54 @@ test("stepClimb ignores non-climb shapes and null/NaN metrics", () => {
   assert.equal(s.best, 0.9);
 });
 
+test("rapid flat polls inside one stall window count NOTHING (a slow swarm is not a plateau)", () => {
+  // The cockpit observes every ~2-3s, but a real swarm needs minutes between harness evals.
+  // After a climb, hammer the monitor with flat readings 2s apart: no stall may accumulate.
+  let s = initClimb();
+  s = stepClimb(s, { shapeId: "climb", metric: 280, ts: 0 }, false); // baseline
+  s = stepClimb(s, { shapeId: "climb", metric: 240, ts: 10_000 }, false); // climbed
+  for (let t = 12_000; t < 10_000 + CLIMB_STALL_SPACING_MS; t += 2_000) {
+    s = stepClimb(s, { shapeId: "climb", metric: 240, ts: t }, false);
+  }
+  assert.equal(s.stallStreak, 0);
+  assert.equal(s.reason, "");
+  // Once a full window elapses with no improvement, exactly ONE stall counts.
+  s = stepClimb(s, { shapeId: "climb", metric: 240, ts: 10_000 + CLIMB_STALL_SPACING_MS }, false);
+  assert.equal(s.stallStreak, 1);
+});
+
+test("plateau needs CLIMB_STALL_STREAK full windows of no improvement", () => {
+  let s = initClimb();
+  s = stepClimb(s, { shapeId: "climb", metric: 280, ts: 0 }, false);
+  s = stepClimb(s, { shapeId: "climb", metric: 240, ts: 1_000 }, false); // climbed at t=1s
+  for (let w = 1; w <= CLIMB_STALL_STREAK; w += 1) {
+    assert.equal(s.reason, "", `still running before window ${w}`);
+    s = stepClimb(
+      s,
+      { shapeId: "climb", metric: 240, ts: 1_000 + w * CLIMB_STALL_SPACING_MS },
+      false,
+    );
+  }
+  assert.equal(s.reason, "plateau");
+});
+
+test("a late improvement re-anchors the stall clock (windows restart from the gain)", () => {
+  let s = initClimb();
+  s = stepClimb(s, { shapeId: "climb", metric: 280, ts: 0 }, false);
+  s = stepClimb(s, { shapeId: "climb", metric: 240, ts: 1_000 }, false);
+  s = stepClimb(s, { shapeId: "climb", metric: 240, ts: 1_000 + CLIMB_STALL_SPACING_MS }, false); // stall 1
+  s = stepClimb(s, { shapeId: "climb", metric: 200, ts: 2_000 + CLIMB_STALL_SPACING_MS }, false); // gain!
+  assert.equal(s.stallStreak, 0);
+  // The next stall needs a FULL window measured from the gain, not from the old anchor.
+  s = stepClimb(s, { shapeId: "climb", metric: 200, ts: 2_500 + CLIMB_STALL_SPACING_MS }, false);
+  assert.equal(s.stallStreak, 0);
+  s = stepClimb(s, { shapeId: "climb", metric: 200, ts: 2_000 + 2 * CLIMB_STALL_SPACING_MS }, false);
+  assert.equal(s.stallStreak, 1);
+});
+
 test("stepClimb is pure: it never mutates the input state", () => {
   const before = initClimb();
   const snapshot = { ...before };
-  stepClimb(before, { shapeId: "climb", metric: 0.9 });
+  stepClimb(before, { shapeId: "climb", metric: 0.9, ts: 1_000 });
   assert.deepEqual(before, snapshot);
 });

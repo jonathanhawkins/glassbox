@@ -1114,7 +1114,7 @@ export function SwarmView() {
     } else if (loopShapeId === "climb") {
       const next = stepClimb(
         climbRef.current,
-        { shapeId: loopShapeId, metric: climbMetric.value },
+        { shapeId: loopShapeId, metric: climbMetric.value, ts: Date.now() },
         climbMetric.higherIsBetter,
       );
       climbRef.current = next;
@@ -1137,11 +1137,19 @@ export function SwarmView() {
         const rows = (await res.json()) as { accuracy?: number; wall_ms?: number }[];
         if (!alive || !Array.isArray(rows) || rows.length === 0) return;
         const wall = rows.map((r) => r.wall_ms).filter((x): x is number => typeof x === "number");
+        // Functional update bails on an unchanged reading, so a steady metric does not
+        // re-render (and re-fire the monitor effect) on every 3s poll.
+        const put = (value: number, higherIsBetter: boolean) =>
+          setClimbMetric((prev) =>
+            prev.value === value && prev.higherIsBetter === higherIsBetter
+              ? prev
+              : { value, higherIsBetter },
+          );
         if (wall.length) {
-          setClimbMetric({ value: Math.min(...wall), higherIsBetter: false });
+          put(Math.min(...wall), false);
         } else {
           const acc = rows.map((r) => r.accuracy).filter((x): x is number => typeof x === "number");
-          if (acc.length) setClimbMetric({ value: Math.max(...acc), higherIsBetter: true });
+          if (acc.length) put(Math.max(...acc), true);
         }
       } catch {
         /* keep last reading */
