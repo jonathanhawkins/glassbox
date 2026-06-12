@@ -42,7 +42,8 @@ export const DEFAULT_SWARM_MODELS: SwarmModels = {
   improver: { model: "fable", effort: "xhigh" },
 };
 
-const KEY = "glassbox-swarm-models-v1";
+/** The localStorage key the swarm view persists the config under (via usePersistentState). */
+export const SWARM_MODELS_KEY = "glassbox-swarm-models-v1";
 
 /** Map a node name (worker-3, planner, ...) to its config row key. */
 export function roleKeyOf(node: string): RoleKey | null {
@@ -56,30 +57,17 @@ export function modelLabel(id: string): string {
   return MODEL_CHOICES.find((m) => m.id === id)?.label ?? id;
 }
 
-/** Load the saved config, merged over the defaults so new roles/fields never come back blank. */
-export function loadSwarmModels(): SwarmModels {
-  if (typeof window === "undefined") return DEFAULT_SWARM_MODELS;
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    if (!raw) return DEFAULT_SWARM_MODELS;
-    const saved = JSON.parse(raw) as Partial<SwarmModels>;
-    const merged = { ...DEFAULT_SWARM_MODELS } as SwarmModels;
-    for (const key of Object.keys(merged) as RoleKey[]) {
-      const s = saved[key];
-      if (s && typeof s.model === "string" && typeof s.effort === "string")
-        merged[key] = { model: s.model, effort: s.effort };
-    }
-    return merged;
-  } catch {
-    return DEFAULT_SWARM_MODELS;
+/**
+ * Revive a stored config: merge the saved roles over the defaults so new roles/fields
+ * never come back blank and a corrupted entry falls back to its default.
+ */
+export function reviveSwarmModels(raw: unknown): SwarmModels {
+  const saved = (raw ?? {}) as Partial<SwarmModels>;
+  const merged = { ...DEFAULT_SWARM_MODELS } as SwarmModels;
+  for (const key of Object.keys(merged) as RoleKey[]) {
+    const s = saved[key];
+    if (s && typeof s.model === "string" && typeof s.effort === "string")
+      merged[key] = { model: s.model, effort: s.effort };
   }
-}
-
-export function saveSwarmModels(m: SwarmModels) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(KEY, JSON.stringify(m));
-  } catch {
-    /* storage disabled: the in-memory state still applies this session */
-  }
+  return merged;
 }

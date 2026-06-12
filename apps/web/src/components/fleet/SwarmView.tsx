@@ -29,10 +29,11 @@ import { ModelsMenu } from "@/components/fleet/ModelsMenu";
 import {
   DEFAULT_SWARM_MODELS,
   ROLE_ROWS,
-  loadSwarmModels,
-  saveSwarmModels,
+  SWARM_MODELS_KEY,
+  reviveSwarmModels,
   type SwarmModels,
 } from "@/lib/voxherd/role-models";
+import { usePersistentState } from "@/lib/usePersistentState";
 import {
   LoopShapeContext,
   type LoopShapeStatus,
@@ -61,17 +62,26 @@ const SELECT_CLS =
 export function SwarmView() {
   // Shared, reference-counted session poller (same interval as FleetView/FleetBoard).
   const { sessions } = useSessions();
-  const [conductorId, setConductorId] = useState("");
-  const [workers, setWorkers] = useState(4);
+  // View settings persist across a refresh (usePersistentState mirrors each to localStorage),
+  // so the cockpit comes back exactly as the operator left it: conductor, worker count, goal,
+  // panel layout, models. Transient stream state (note, terminal lines, mail) stays useState.
+  const [conductorId, setConductorId] = usePersistentState("glassbox-swarm-conductor-v1", "");
+  const [workers, setWorkers] = usePersistentState("glassbox-swarm-workers-v1", 4);
   const [note, setNote] = useState("");
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<string[]>([]);
-  const [consoleOpen, setConsoleOpen] = useState(false);
-  const [consoleTab, setConsoleTab] = useState<"console" | "history" | "mail">("console");
+  const [consoleOpen, setConsoleOpen] = usePersistentState("glassbox-swarm-console-open-v1", false);
+  const [consoleTab, setConsoleTab] = usePersistentState<"console" | "history" | "mail">(
+    "glassbox-swarm-console-tab-v1",
+    "console",
+  );
   // Live agent-to-agent coordination feed (the REAL Agent Mail the spawned swarm uses).
   const [mail, setMail] = useState<{ id: number; from: string; subject: string; importance: string; ts: string }[]>([]);
-  const [railOpen, setRailOpen] = useState(false);
-  const [activityOpen, setActivityOpen] = useState(true);
+  const [railOpen, setRailOpen] = usePersistentState("glassbox-swarm-rail-open-v1", false);
+  const [activityOpen, setActivityOpen] = usePersistentState(
+    "glassbox-swarm-activity-open-v1",
+    true,
+  );
   const [tasks, setTasks] = useState<
     Record<string, { subject?: string; description?: string; status?: string }>
   >({});
@@ -82,19 +92,15 @@ export function SwarmView() {
   const [nodeSessions, setNodeSessions] = useState<Record<string, string>>({});
   const [workerLines, setWorkerLines] = useState<string[]>([]);
   const [workerInput, setWorkerInput] = useState("");
-  const [realGoal, setRealGoal] = useState("");
+  const [realGoal, setRealGoal] = usePersistentState("glassbox-swarm-goal-v1", "");
   const [spawning, setSpawning] = useState(false);
-  // Per-role model + effort for the next "+ real swarm" spawn. Starts at the defaults so the
-  // server render matches, then hydrates from localStorage on mount (saved choices stick).
-  const [swarmModels, setSwarmModels] = useState<SwarmModels>(DEFAULT_SWARM_MODELS);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot localStorage hydration after mount (avoids an SSR hydration mismatch)
-    setSwarmModels(loadSwarmModels());
-  }, []);
-  const updateModels = useCallback((m: SwarmModels) => {
-    setSwarmModels(m);
-    saveSwarmModels(m);
-  }, []);
+  // Per-role model + effort for the next "+ real swarm" spawn, persisted; the revive merges
+  // a saved config over the defaults so new roles/fields never come back blank.
+  const [swarmModels, setSwarmModels] = usePersistentState<SwarmModels>(
+    SWARM_MODELS_KEY,
+    DEFAULT_SWARM_MODELS,
+    reviveSwarmModels,
+  );
   // Persisted (Redis) per-node session log snapshots: the durable record that survives teardown.
   const [swarmLogs, setSwarmLogs] = useState<
     Record<string, { sessionId?: string; summary?: string; preview?: string; activity?: string; status?: string; ts: number }>
@@ -110,7 +116,11 @@ export function SwarmView() {
   // The active loop shape (contract archetype id): drives the board's return-edge
   // overlay and the lane relabels. Kept after the loop ends so the end chip
   // (landed, plateau, winner picked) stays readable; replaced on the next Run.
-  const [loopShapeId, setLoopShapeId] = useState<string | null>(null);
+  // Persisted so a refresh re-arms the same shape on the board.
+  const [loopShapeId, setLoopShapeId] = usePersistentState<string | null>(
+    "glassbox-swarm-shape-v1",
+    null,
+  );
   const loopShapeIdRef = useRef<string | null>(null);
   // The activity log derives the loop's round/finish beats from the loop snapshot, which keeps
   // no history of its own. These track what we have already logged so a re-emit of the same
@@ -176,20 +186,24 @@ export function SwarmView() {
   const conductorProject = conductor?.project ?? "";
 
   // Deep-link: /swarm?session=<id> pre-selects the conductor once that session loads.
-  // Self-limiting (it clears its own precondition once it sets conductorId), so no
-  // prev-tracker is needed.
+  // Applied exactly once (the guard state self-limits) and it OVERRIDES the persisted
+  // conductor, since an explicit link beats a remembered choice.
+  const [sessionLinkApplied, setSessionLinkApplied] = useState(false);
   const wanted = searchParams?.get("session") ?? "";
-  if (wanted && !conductorId && sessions.some((s) => s.session_id === wanted)) {
+  if (wanted && !sessionLinkApplied && sessions.some((s) => s.session_id === wanted)) {
+    setSessionLinkApplied(true);
     setConductorId(wanted);
   }
 
   // Deep-link: /swarm?shape=<id> pre-arms a loop shape so its return edge, lane
   // relabels, and (for race) the parallel-lane column render without running a
   // loop. The demo's "show every shape" surface; running a loop replaces it.
-  // Render only sets state (same self-limiting pattern as ?session=); the
-  // controller side effect runs in the loopShapeId effect below.
+  // Render only sets state (the controller side effect runs in the loopShapeId
+  // effect below); applied once, overriding the persisted shape.
+  const [shapeLinkApplied, setShapeLinkApplied] = useState(false);
   const wantedShape = searchParams?.get("shape") ?? "";
-  if (wantedShape && !loopShapeId && wantedShape in LOOP_SHAPES) {
+  if (wantedShape && !shapeLinkApplied && wantedShape in LOOP_SHAPES) {
+    setShapeLinkApplied(true);
     setLoopShapeId(wantedShape);
   }
 
@@ -403,7 +417,8 @@ export function SwarmView() {
     };
     window.addEventListener("glassbox:agent-click", handler);
     return () => window.removeEventListener("glassbox:agent-click", handler);
-  }, []);
+    // setConsoleOpen is a stable usePersistentState setter (keyed), listed for the lint rule.
+  }, [setConsoleOpen]);
 
   // Stream the picked node's OWN session terminal, if it is a real spawned session (Phase B).
   useEffect(() => {
@@ -710,7 +725,8 @@ export function SwarmView() {
         onState: setLoop,
       });
     },
-    [conductor, workers],
+    // setLoopShapeId / setRailOpen are stable usePersistentState setters, listed for the lint rule.
+    [conductor, workers, setLoopShapeId, setRailOpen],
   );
 
   const giveSkill = useCallback(
@@ -973,13 +989,17 @@ export function SwarmView() {
 
   // A click on an activity row jumps to its subject: a bead opens the inspector (same path as
   // the history tab), an agent (a worker named in a mail) opens its lane inspector.
-  const onSelectActivity = useCallback((e: ActivityEntry) => {
-    if (e.beadId) setPicked({ id: e.beadId, x: 360, y: 160 });
-    else if (e.agent) {
-      setConsoleOpen(true);
-      setPickedWorker(e.agent);
-    }
-  }, []);
+  const onSelectActivity = useCallback(
+    (e: ActivityEntry) => {
+      if (e.beadId) setPicked({ id: e.beadId, x: 360, y: 160 });
+      else if (e.agent) {
+        setConsoleOpen(true);
+        setPickedWorker(e.agent);
+      }
+    },
+    // setConsoleOpen is a stable usePersistentState setter (keyed), listed for the lint rule.
+    [setConsoleOpen],
+  );
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-canvas text-ink-mid">
@@ -1029,7 +1049,7 @@ export function SwarmView() {
               ))}
             </select>
           </label>
-          <ModelsMenu value={swarmModels} onChange={updateModels} workers={workers} />
+          <ModelsMenu value={swarmModels} onChange={setSwarmModels} workers={workers} />
           {conductor && (
             <span className="flex items-center gap-1.5 border-l border-line pl-3">
               <input
