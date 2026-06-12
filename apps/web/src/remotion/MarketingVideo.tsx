@@ -642,7 +642,8 @@ function Close() {
   const frame = useCurrentFrame();
   const a = useRise(8);
   const b = useRise(30);
-  const c = useRise(68);
+  const c = useRise(56);
+  const url = useRise(72);
   const underline = interpolate(frame, [18, 58], [0, 360], { ...clamp, easing: EASE });
   return (
     <SceneShell duration={CLOSE_END - BOARD_END}>
@@ -666,11 +667,23 @@ function Close() {
           </div>
           <div style={{ display: "flex", gap: 18, justifyContent: "center", marginTop: 34 }}>
             {STACK.map((s, i) => (
-              <StackPill key={s} text={s} delay={44 + i * 9} />
+              <StackPill key={s} text={s} delay={42 + i * 7} />
             ))}
           </div>
-          <div style={{ ...c, marginTop: 30, fontFamily: MONO, fontSize: 24, color: T.inkDim }}>
+          <div style={{ ...c, marginTop: 28, fontFamily: MONO, fontSize: 23, color: T.inkDim }}>
             born at WeaveHacks, a Weights &amp; Biases hackathon · graded by a hard oracle
+          </div>
+          <div
+            style={{
+              ...url,
+              marginTop: 26,
+              fontFamily: MONO,
+              fontSize: 34,
+              fontWeight: 700,
+              color: T.accentBright,
+            }}
+          >
+            github.com/jonathanhawkins/glassbox
           </div>
         </div>
       </AbsoluteFill>
