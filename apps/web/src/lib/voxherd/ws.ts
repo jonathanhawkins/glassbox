@@ -69,10 +69,14 @@ export async function spawnSession(opts: {
   dir?: string;
   assistant?: string;
   prompt?: string;
-  // Extra environment for the spawned session (the bridge launches `claude` with it). Used to
-  // share ONE task list across a swarm: CLAUDE_CODE_TASK_LIST_ID = the conductor's session id, so
-  // the planner's plan and the workers' completions land in the one list the board polls. Bridges
-  // that don't read `env` ignore it (pydantic drops unknown fields), so it is safe to always send.
+  // Extra environment for the spawned session, intended to share ONE task list across a swarm
+  // (CLAUDE_CODE_TASK_LIST_ID = the conductor's session id) so the plan and the workers'
+  // completions land in the one list the board polls.
+  //
+  // NOTE (verified 2026-06-12): the CURRENT VoxHerdBridge build does NOT read this field — a live
+  // test showed the spawned planner still wrote to its OWN session-id task list, not the conductor's.
+  // The field is harmless (pydantic drops unknowns) and kept ready for a bridge that adds env
+  // support; until then, a shared task list needs a bridge update or a board-side completion merge.
   env?: Record<string, string>;
 }): Promise<{ ok: boolean; tmuxSession?: string; error?: string }> {
   const token = await getToken();
