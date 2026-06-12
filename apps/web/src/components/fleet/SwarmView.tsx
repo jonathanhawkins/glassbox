@@ -36,6 +36,7 @@ import {
 } from "@/lib/voxherd/role-models";
 import { routeMailToWorkers, tallyMailCounts } from "@/lib/voxherd/mail-route";
 import { usePersistentState } from "@/lib/usePersistentState";
+import { initSweep, stepSweep, type SweepState } from "@/lib/fleet/loop-monitor";
 import {
   LoopShapeContext,
   type LoopShapeStatus,
@@ -135,6 +136,12 @@ export function SwarmView() {
   const seenSubRef = useRef<Set<string>>(new Set());
   // Task id -> worker lane already routed from the mail protocol (dedups bead_claimed emits).
   const mailRouteRef = useRef<Map<string, string>>(new Map());
+  // Real-swarm shape monitor: a spawned swarm runs autonomously (no loop kernel), so the cockpit
+  // DETECTS the armed shape's stop condition from the live task counts (pure kernel in
+  // lib/fleet/loop-monitor). v1 handles Sweep (backlog drained). `realStop.reason` is "" while
+  // running, "done" once the condition is reached.
+  const [realStop, setRealStop] = useState<{ reason: string; round: number }>({ reason: "", round: 0 });
+  const sweepRef = useRef<SweepState>(initSweep());
   const prevSubCountRef = useRef(0);
   const searchParams = useSearchParams();
   // The floating header wraps on smaller screens (flex-wrap), so its height is not
@@ -799,6 +806,9 @@ export function SwarmView() {
       // and the run's identity is visible from the first second.
       const shape = ARCHETYPES.find((a) => a.id === realShapeId) ?? ARCHETYPES[0];
       setLoopShapeId(shape.id);
+      // Re-arm the real-swarm shape monitor for this run (see the monitor effect below).
+      sweepRef.current = initSweep();
+      setRealStop({ reason: "", round: 0 });
       setSpawning(true);
       setNote(`spawning real swarm (${shape.name} loop)…`);
       try {
@@ -913,17 +923,37 @@ export function SwarmView() {
   }, [conductor, nodeSessions, sessions]);
 
   // The goal's requirement: once the loop reports the goal is genuinely met (LOOP_DONE), tear
-  // the swarm down automatically, but only on a real "done", not a manual stop or max-rounds.
+  // Real-swarm shape monitor: a spawned swarm runs autonomously (no loop kernel), so the cockpit
+  // detects the armed shape's stop condition from the live task counts and feeds it into
+  // loopStatus (the gauge, the end chip, and the auto-teardown below). v1: SWEEP stops when the
+  // backlog drains to empty and STAYS empty (debounced, so a momentary gap between waves does not
+  // count). Land/Climb hook in here next.
   useEffect(() => {
-    if (loop?.running) {
-      torndownRef.current = false; // re-arm for the next run
+    const hasSwarm = Object.keys(nodeSessions).length > 0;
+    if (!hasSwarm || !loopShapeId || loop) return; // the kernel ("Run") drives its own status
+    const next = stepSweep(sweepRef.current, {
+      shapeId: loopShapeId,
+      backlog: counts.queued + counts.working,
+      done: counts.done,
+    });
+    sweepRef.current = next;
+    if (next.reason !== realStop.reason) setRealStop({ reason: next.reason, round: 0 });
+  }, [counts, loopShapeId, loop, nodeSessions, realStop.reason]);
+
+  // the swarm down automatically, but only on a real "done", not a manual stop or max-rounds.
+  // The "done" can come from the loop kernel (rail Run) OR the real-swarm shape monitor above.
+  useEffect(() => {
+    const realRunning = Object.keys(nodeSessions).length > 0 && Boolean(loopShapeId) && realStop.reason === "";
+    if (loop?.running || realRunning) {
+      torndownRef.current = false; // re-arm while a loop (kernel or real) is running
       return;
     }
-    if (loop?.reason === "done" && !torndownRef.current && Object.keys(nodeSessions).length) {
+    const done = loop?.reason === "done" || realStop.reason === "done";
+    if (done && !torndownRef.current && Object.keys(nodeSessions).length) {
       torndownRef.current = true;
       void teardownSwarm();
     }
-  }, [loop?.reason, loop?.running, nodeSessions, teardownSwarm]);
+  }, [loop?.reason, loop?.running, realStop.reason, loopShapeId, nodeSessions, teardownSwarm]);
 
   // Record the loop's round-by-round and finish beats into the persisted run log, so the
   // activity feed shows the loop stepping (and where it stopped) interleaved with the agent
@@ -975,17 +1005,19 @@ export function SwarmView() {
   // which shape is active, where the loop stands, and the task counts that feed
   // the sweep/dig gauges. Provided via context because tldraw's OnTheCanvas
   // slot (SwarmRoutingEdges) takes no props.
-  const loopStatus = useMemo<LoopShapeStatus>(
-    () => ({
+  const loopStatus = useMemo<LoopShapeStatus>(() => {
+    // The kernel loop ("Run") drives its own status; a spawned real swarm has no kernel, so fall
+    // back to the real-swarm shape monitor (realStop) for running/round/reason.
+    const realRunning = Object.keys(nodeSessions).length > 0 && Boolean(loopShapeId) && realStop.reason === "";
+    return {
       id: loopShapeId,
-      running: loop?.running ?? false,
-      round: loop?.round ?? 0,
+      running: loop?.running ?? realRunning,
+      round: loop?.round ?? realStop.round,
       maxRounds: loop?.maxRounds ?? 0,
-      reason: loop?.reason ?? "",
+      reason: loop?.reason ?? realStop.reason,
       counts,
-    }),
-    [loopShapeId, loop, counts],
-  );
+    };
+  }, [loopShapeId, loop, counts, realStop, nodeSessions]);
 
   // The activity log: normalize the swarm's two persistent live sources into one chronological
   // stream (newest first). The run log already carries the conductor's sub-agent dispatches and
