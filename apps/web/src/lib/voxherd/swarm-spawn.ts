@@ -21,23 +21,30 @@ const intro = (goal: string, role: string) =>
   `- Use the Agent Mail tools (mcp-agent-mail): register your identity once, send messages to ` +
   `teammates (conductor, workers, validator, improver), and poll your inbox each loop.\n` +
   `- Use the shared task list (TaskCreate / TaskUpdate) for work items so progress shows on the ` +
-  `board.\n\n`;
+  `board.\n` +
+  `- PROTOCOL: when a message is about a task, the SUBJECT must name the task id and the role, ` +
+  `e.g. "assign task 14 -> worker-2: parse fixtures" or "worker-2 done task 14: parser passing". ` +
+  `The operator's board routes work across the lanes by reading exactly these subjects.\n\n`;
 
 function plannerPrompt(goal: string): string {
   return (
     intro(goal, "the PLANNER") +
-    `You PLAN, you do not implement. Decompose the goal into a clear, ordered set of concrete ` +
-    `tasks with TaskCreate (each becomes a bead), then Agent-mail the coordinator the plan so it ` +
-    `can hand the work out. Re-plan whenever the validator or improver surface new gaps.`
+    `You PLAN, you do not implement. Your VERY FIRST action after registering: decompose the ` +
+    `goal into a clear, ordered set of concrete tasks with TaskCreate, BEFORE any deeper ` +
+    `analysis — each task becomes a bead on the operator's board the moment you create it, so ` +
+    `the plan must be visible within your first minute. Then Agent-mail the coordinator the ` +
+    `plan (task ids + subjects) so it can hand the work out. Re-plan whenever the validator or ` +
+    `improver surface new gaps.`
   );
 }
 
 function coordinatorPrompt(goal: string): string {
   return (
     intro(goal, "the COORDINATOR") +
-    `You ROUTE, you do not implement. Take the planner's tasks, assign each to a worker via Agent ` +
-    `Mail (balance the load), track who holds what, and keep the pipeline moving. Route the ` +
-    `improver's fix tasks to a free worker as they appear.`
+    `You ROUTE, you do not implement. Take the planner's tasks and assign each to a worker via ` +
+    `Agent Mail (balance the load), one message per assignment with the subject ` +
+    `"assign task <id> -> worker-<n>: <short title>". Track who holds what and keep the ` +
+    `pipeline moving. Route the improver's fix tasks to a free worker as they appear.`
   );
 }
 
@@ -45,10 +52,11 @@ function workerPrompt(goal: string, n: number): string {
   return (
     intro(goal, `WORKER-${n}`) +
     `Your loop: poll Agent Mail + the task list for an unclaimed or assigned task. Claim it ` +
-    `(TaskUpdate -> in_progress), implement it FOR REAL (edit files, run commands), then mark it ` +
-    `completed and Agent-Mail the VALIDATOR: "done: <task> — please verify". Pick up FIX tasks the ` +
-    `validator/improver create. Keep working until the validator reports the goal passes. Take a ` +
-    `file lease before editing shared files so workers do not collide.`
+    `(TaskUpdate -> in_progress) and Agent-Mail the coordinator "worker-${n} claimed task <id>: ` +
+    `<short title>", implement it FOR REAL (edit files, run commands), then mark it completed ` +
+    `and Agent-Mail the VALIDATOR "worker-${n} done task <id>: <what changed> — please verify". ` +
+    `Pick up FIX tasks the validator/improver create. Keep working until the validator reports ` +
+    `the goal passes. Take a file lease before editing shared files so workers do not collide.`
   );
 }
 
@@ -94,7 +102,9 @@ export function conductorBlueprint(
     `You are the CONDUCTOR of a live agent swarm. Goal:\n\n${goal}\n\n` +
     `I have spawned dedicated teammate sessions: ${roster}. They each poll Agent Mail and the ` +
     `shared task list. Orchestrate the real cycle: decompose the goal into concrete tasks ` +
-    `(TaskCreate), Agent-Mail each worker its assignment, let the validator verify with real tests ` +
+    `(TaskCreate, FIRST, so the plan is on the board within a minute), Agent-Mail each worker its ` +
+    `assignment with the subject "assign task <id> -> worker-<n>: <short title>" (the board routes ` +
+    `beads to lanes by these subjects), let the validator verify with real tests ` +
     `(and Chrome/computer-use if available), and let the improver turn failures into new tasks + ` +
     `tickets. ${loop} Do not ` +
     `simulate any of it — coordinate over Agent Mail and the task list for real.`

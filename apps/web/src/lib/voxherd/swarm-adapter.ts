@@ -5,11 +5,11 @@
 // Source: the conductor's Claude Code task list (GET /api/tasks/{project}). These tasks carry
 // NO owner/assignee field (verified: keys are id/subject/description/status/activeForm/
 // blocks/blockedBy), so we show them honestly as the conductor's active QUEUE (backlog beads,
-// capped + newest-first for legibility) and move a bead to "done" when its task completes. We
-// deliberately do NOT route tasks to worker lanes: there is no data for "worker-N owns task X",
-// so that routing would be fabricated. Worker/validator/improver lanes light up only from REAL
-// activity (sub-agents the conductor spawns, or +real swarm sessions), which SwarmView feeds in
-// as agent_status events.
+// capped + newest-first for legibility) and move a bead to "done" when its task completes. This
+// adapter does NOT route tasks to worker lanes (the task list has no data for "worker-N owns
+// task X"); SwarmView routes them instead from the swarm's REAL Agent Mail, whose protocol
+// subjects ("assign task 14 -> worker-2: ...") genuinely carry ownership. Worker/validator/
+// improver lane statuses light up from real session activity via agent_status events.
 
 import type { GlassboxEvent } from "@glassbox/contract";
 

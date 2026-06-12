@@ -131,6 +131,8 @@ export function SwarmView() {
   const lastLoggedRoundRef = useRef(0);
   const loggedFinishRef = useRef(false);
   const seenSubRef = useRef<Set<string>>(new Set());
+  // Task id -> worker lane already routed from the mail protocol (dedups bead_claimed emits).
+  const mailRouteRef = useRef<Map<string, string>>(new Map());
   const prevSubCountRef = useRef(0);
   const searchParams = useSearchParams();
   // The floating header wraps on smaller screens (flex-wrap), so its height is not
@@ -450,10 +452,11 @@ export function SwarmView() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [workerLines]);
 
-  // Reset the sub-agent tracking when the conductor changes.
+  // Reset the sub-agent + mail-route tracking when the conductor changes (fresh board).
   useEffect(() => {
     seenSubRef.current = new Set();
     prevSubCountRef.current = 0;
+    mailRouteRef.current = new Map();
   }, [conductorId]);
 
   // Reflect the conductor's REAL sub-agent activity on the board: a bead per sub-agent it
@@ -540,6 +543,38 @@ export function SwarmView() {
       controller.setMailCount(worker, counts[worker] ?? 0);
     }
   }, [mail]);
+
+  // Route REAL task beads to worker lanes from the mail protocol. The voxherd task list
+  // carries no assignee, but the swarm's coordination mail does: the role prompts require
+  // task subjects like "assign task 14 -> worker-2: ..." / "worker-2 done task 14: ...".
+  // Any message naming both a worker and a task id moves that task's bead onto that worker's
+  // dock, so the operator watches the plan fan out planner -> coordinator -> workers for real
+  // (completion still comes from the task list itself via the swarm adapter). Chronological
+  // scan so the latest signal wins a task's lane; the ref dedups re-emits across polls.
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!controller || !mail.length) return;
+    const ordered = [...mail].reverse(); // mail arrives newest-first; emit oldest-first
+    for (const m of ordered) {
+      const w = m.subject.match(/worker[\s_-]?([1-4])/i);
+      const t = m.subject.match(/task[\s#:_-]*(\d+)/i);
+      if (!w || !t) continue;
+      const worker = `worker-${w[1]}`;
+      const taskId = t[1];
+      if (mailRouteRef.current.get(taskId) === worker) continue;
+      mailRouteRef.current.set(taskId, worker);
+      controller.apply({
+        ts: Date.now(),
+        type: "bead_claimed",
+        run_id: "mail-route",
+        planner_version: 1,
+        agent: worker,
+        bead_id: `task-${taskId}`,
+        title: tasks[taskId]?.subject ?? m.subject,
+        payload: { capability: "task" },
+      } as GlassboxEvent);
+    }
+  }, [mail, tasks]);
 
   // Light up the board's mapped nodes from their REAL spawned sessions' status (Phase B):
   // once a node has a dedicated session, its lane reflects that session, not the task lanes.
