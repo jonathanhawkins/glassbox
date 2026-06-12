@@ -30,6 +30,9 @@ importers:
       '@glassbox/contract':
         specifier: workspace:*
         version: link:../../contract
+      '@remotion/player':
+        specifier: ^4.0.476
+        version: 4.0.476(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       ioredis:
         specifier: ^5.11.1
         version: 5.11.1
@@ -48,6 +51,9 @@ importers:
       recharts:
         specifier: ^3.8.1
         version: 3.8.1(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.4))(react-is@18.3.1)(react@19.2.4)(redux@5.0.1)
+      remotion:
+        specifier: ^4.0.476
+        version: 4.0.476(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       tldraw:
         specifier: ^5.1.0
         version: 5.1.0(@floating-ui/dom@1.7.6)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -1634,6 +1640,12 @@ packages:
 
   '@remix-run/node-fetch-server@0.13.3':
     resolution: {integrity: sha512-UfjOXed/DQteaM5VyTfqTeGpHwyL2J5aoRGY6cydip4tt1ehNNeSwuXCC7AEGE0RWBs/7bgKxYkL/B/+UDe4AA==}
+
+  '@remotion/player@4.0.476':
+    resolution: {integrity: sha512-qdQiHa9vx7tc/t8h0yEHJnloquoVhZ16aJNVvjtTXcCftLhMOA8zqGF8uwJrTk8YiAD9xRUb5jf2EWRAmzGJGQ==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
 
   '@repeaterjs/repeater@3.0.6':
     resolution: {integrity: sha512-Javneu5lsuhwNCryN+pXH93VPQ8g0dBX7wItHFgYiwQmzE1sVdg5tWHiOgHywzL2W21XQopa7IwIEnNbmeUJYA==}
@@ -4967,6 +4979,12 @@ packages:
   remend@1.0.1:
     resolution: {integrity: sha512-152puVH0qMoRJQFnaMG+rVDdf01Jq/CaED+MBuXExurJgdbkLp0c3TIe4R12o28Klx8uyGsjvFNG05aFG69G9w==}
 
+  remotion@4.0.476:
+    resolution: {integrity: sha512-49lEgqRjGr5qzt2la/O/x9H9gLug5/jPYHQyNGSlEC73+l6Gw4pjcSJZNA/t5t806slpf/qnSdunB9bXPsz34g==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
+
   require-from-string@2.0.2:
     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
     engines: {node: '>=0.10.0'}
@@ -7421,6 +7439,12 @@ snapshots:
       react-redux: 9.3.0(@types/react@19.2.17)(react@19.2.4)(redux@5.0.1)
 
   '@remix-run/node-fetch-server@0.13.3': {}
+
+  '@remotion/player@4.0.476(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+    dependencies:
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+      remotion: 4.0.476(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
 
   '@repeaterjs/repeater@3.0.6': {}
 
@@ -11605,6 +11629,11 @@ snapshots:
       unified: 11.0.5
 
   remend@1.0.1: {}
+
+  remotion@4.0.476(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+    dependencies:
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
 
   require-from-string@2.0.2: {}
 
