@@ -852,7 +852,10 @@ export function SwarmView() {
     climbRef.current = initClimb();
     setClimbMetric({ value: null, higherIsBetter: true });
     setRealStop({ reason: "", round: 0 });
-    swarmCache.log(project, { kind: "note", text: "run cleared: board reset, /clear sent to conductor" });
+    // The activity rail + history tab reflect the cleared run too: wipe the cached timeline
+    // and beads (roles survive; see swarmCache.clearRun). No marker entry on purpose, an
+    // empty rail IS the clean state; the header note carries the confirmation.
+    swarmCache.clearRun(project);
     const sentAt = Date.now();
     await sendToConductor("/clear");
     // /clear ROLLS the Claude Code session: the conductor re-registers under a NEW session id
@@ -1375,7 +1378,10 @@ export function SwarmView() {
               <span className="text-accent">{counts.working} working</span>
               <span>{counts.queued} queued</span>
               <span>{counts.done} done</span>
-              {(counts.working + counts.queued + counts.done > 0 || mail.length > 0) && (
+              {(counts.working + counts.queued + counts.done > 0 ||
+                mail.length > 0 ||
+                run.log.length > 0 ||
+                Object.keys(run.beads).length > 0) && (
                 <button
                   type="button"
                   onClick={() => void clearRun()}

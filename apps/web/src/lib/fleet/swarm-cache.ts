@@ -229,6 +229,16 @@ export const swarmCache = {
     rosters = nextRosters;
     emit();
   },
+  // Wipe a project's recorded RUN (cached beads + the timeline log) while keeping its role
+  // mappings, so the header "clear" leaves the activity rail and the history tab as clean as
+  // the board. Roles survive on purpose: clearing with live spawned sessions must not unlabel
+  // their terminals (teardown/pruneToLive own role cleanup).
+  clearRun(project: string) {
+    const run = state[project];
+    if (!run || (!Object.keys(run.beads).length && !run.log.length)) return;
+    state = { ...state, [project]: { ...run, beads: {}, log: [], updatedAt: Date.now() } };
+    emit();
+  },
   clear(project: string) {
     if (!state[project]) return;
     const next = { ...state };
