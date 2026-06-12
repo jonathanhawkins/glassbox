@@ -13,7 +13,7 @@ GLASSBOX_PACE_MS=600 pnpm backend           # swarm + AG-UI server :8100 (paced 
 pnpm web                                     # cockpit :3100
 ```
 
-Open `http://localhost:3100`. Use the cockpit Reset button (it clears the per-task
+Open `http://localhost:3100/hackathon` (the simulated cockpit; `/` now opens the swarm command center). Use the cockpit Reset button (it clears the per-task
 leaderboards and the board) right before you go on. Workers author with the model by
 default; for a fast, fully reliable live board set `GLASSBOX_WORKER_LLM=0` (the
 deterministic reference path) and show a captured genuine run for the authoring beat.

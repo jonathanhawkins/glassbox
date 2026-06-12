@@ -162,7 +162,7 @@ export function Deck({ only }: { only?: readonly string[] }) {
       {/* Bottom chrome: back-to-cockpit link, dot rail, and slide counter. */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex items-center justify-between px-7 py-5">
         <Link
-          href="/"
+          href="/hackathon"
           className="pointer-events-auto font-mono text-xs uppercase tracking-[0.18em] text-ink-dim transition hover:text-accent"
         >
           {"<-"} live cockpit

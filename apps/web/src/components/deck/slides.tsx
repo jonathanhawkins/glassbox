@@ -876,7 +876,7 @@ export const SLIDES: Slide[] = [
 
           <div className="relative z-40 mt-12 grid w-full gap-4 md:grid-cols-2">
             <Link
-              href="/"
+              href="/hackathon"
               className="group flex items-center justify-between rounded-2xl border border-accent/40 bg-accent/10 px-6 py-5 transition hover:bg-accent/20"
             >
               <div>
