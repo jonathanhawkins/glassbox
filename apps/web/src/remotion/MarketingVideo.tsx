@@ -142,7 +142,7 @@ function Open() {
               color: T.inkDim,
             }}
           >
-            spawn a real swarm. watch it work. it knows when to stop.
+            give it a job. watch it work. it stops when it&apos;s done.
           </div>
         </div>
       </AbsoluteFill>
