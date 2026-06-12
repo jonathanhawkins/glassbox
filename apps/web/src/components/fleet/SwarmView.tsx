@@ -25,6 +25,14 @@ import { SkillsMenu } from "@/components/fleet/SkillsMenu";
 import { AnsiLines } from "@/components/fleet/AnsiLines";
 import { ActivityFeed, type ActivityEntry } from "@/components/fleet/ActivityFeed";
 import { CollapseButton } from "@/components/cockpit/CollapseButton";
+import { ModelsMenu } from "@/components/fleet/ModelsMenu";
+import {
+  DEFAULT_SWARM_MODELS,
+  ROLE_ROWS,
+  loadSwarmModels,
+  saveSwarmModels,
+  type SwarmModels,
+} from "@/lib/voxherd/role-models";
 import {
   LoopShapeContext,
   type LoopShapeStatus,
@@ -76,6 +84,17 @@ export function SwarmView() {
   const [workerInput, setWorkerInput] = useState("");
   const [realGoal, setRealGoal] = useState("");
   const [spawning, setSpawning] = useState(false);
+  // Per-role model + effort for the next "+ real swarm" spawn. Starts at the defaults so the
+  // server render matches, then hydrates from localStorage on mount (saved choices stick).
+  const [swarmModels, setSwarmModels] = useState<SwarmModels>(DEFAULT_SWARM_MODELS);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot localStorage hydration after mount (avoids an SSR hydration mismatch)
+    setSwarmModels(loadSwarmModels());
+  }, []);
+  const updateModels = useCallback((m: SwarmModels) => {
+    setSwarmModels(m);
+    saveSwarmModels(m);
+  }, []);
   // Persisted (Redis) per-node session log snapshots: the durable record that survives teardown.
   const [swarmLogs, setSwarmLogs] = useState<
     Record<string, { sessionId?: string; summary?: string; preview?: string; activity?: string; status?: string; ts: number }>
@@ -733,11 +752,17 @@ export function SwarmView() {
       setNote("spawning real swarm…");
       try {
         const project = conductor.project;
+        // Record which brain each role got, so the activity log carries the provenance.
+        swarmCache.log(project, {
+          kind: "note",
+          text: `models: ${ROLE_ROWS.map((r) => `${r.label} ${swarmModels[r.key].model}/${swarmModels[r.key].effort}`).join(" · ")}`,
+        });
         const map = await spawnSwarm({
           project,
           dir: conductor.project_dir,
           goal: goal.trim(),
           workers,
+          models: swarmModels,
           onProgress: setNote,
           // Map + tag each node the instant it is alive, so its live terminal is clickable right
           // away instead of after the whole swarm finishes spawning.
@@ -768,7 +793,7 @@ export function SwarmView() {
         setSpawning(false);
       }
     },
-    [conductor, workers, spawning, sendToConductor],
+    [conductor, workers, spawning, swarmModels, sendToConductor],
   );
 
   const sendToWorker = useCallback(
@@ -1001,6 +1026,7 @@ export function SwarmView() {
               ))}
             </select>
           </label>
+          <ModelsMenu value={swarmModels} onChange={updateModels} workers={workers} />
           {conductor && (
             <span className="flex items-center gap-1.5 border-l border-line pl-3">
               <input

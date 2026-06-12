@@ -9,7 +9,8 @@
 // Returns a node-name -> session_id map so the board can stream each node's OWN live terminal.
 
 import { spawnSession } from "./ws";
-import { fetchSessions, renameSession } from "./client";
+import { fetchSessions, renameSession, sendCommand } from "./client";
+import { roleKeyOf, type SwarmModels } from "./role-models";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -89,15 +90,15 @@ export function conductorBlueprint(goal: string, nodes: Record<string, string>):
   );
 }
 
-// Spawn one session and resolve its voxherd session_id (the bridge returns a tmux name; the
+// Spawn one BARE session (no prompt: the model/effort slash commands go in first, then the
+// role prompt) and resolve its voxherd session_id (the bridge returns a tmux name; the
 // session_id is assigned on registration, so we poll until a new one appears).
 async function spawnAndFind(
   project: string,
   dir: string | undefined,
-  prompt: string,
   known: Set<string>,
 ): Promise<string | null> {
-  const r = await spawnSession({ project, dir, prompt });
+  const r = await spawnSession({ project, dir });
   if (!r.ok) return null;
   for (let i = 0; i < 25; i += 1) {
     await sleep(1000);
@@ -121,12 +122,15 @@ export async function spawnSwarm(opts: {
   dir?: string;
   goal: string;
   workers: number;
+  // Per-role model + effort: typed into each fresh session as /model + /effort BEFORE its
+  // role prompt, so the whole role runs on the chosen brain (defaults in role-models.ts).
+  models?: SwarmModels;
   onProgress?: (msg: string) => void;
   // Fires the instant each node's session registers, so the board can map + stream its live
   // terminal immediately instead of waiting for the whole swarm (5-8 sessions) to finish.
   onNode?: (node: string, sessionId: string) => void;
 }): Promise<Record<string, string>> {
-  const { project, dir, goal, workers, onProgress, onNode } = opts;
+  const { project, dir, goal, workers, models, onProgress, onNode } = opts;
   let known: Set<string>;
   try {
     known = new Set((await fetchSessions()).map((s) => s.session_id));
@@ -137,13 +141,27 @@ export async function spawnSwarm(opts: {
 
   const place = async (node: string, prompt: string) => {
     onProgress?.(`spawning ${node}…`);
-    const sid = await spawnAndFind(project, dir, prompt, known);
+    const sid = await spawnAndFind(project, dir, known);
     if (!sid) return;
     map[node] = sid;
     // Name it at the voxherd level (no-op on older bridge builds) and tell the caller NOW so the
     // node lights up + streams its real terminal as soon as it is alive.
     void renameSession(sid, node);
     onNode?.(node, sid);
+    // Configure the brain FIRST: /model + /effort go down the same send-keys path as every
+    // other command, into the still-idle session, so the role prompt below runs on the chosen
+    // model instead of the default. Short settles keep the typed lines from interleaving.
+    const role = roleKeyOf(node);
+    const cfg = role ? models?.[role] : undefined;
+    await sleep(800);
+    if (cfg) {
+      onProgress?.(`${node}: /model ${cfg.model} · /effort ${cfg.effort}`);
+      await sendCommand({ project, session_id: sid, message: `/model ${cfg.model}` });
+      await sleep(600);
+      await sendCommand({ project, session_id: sid, message: `/effort ${cfg.effort}` });
+      await sleep(600);
+    }
+    await sendCommand({ project, session_id: sid, message: prompt });
   };
 
   await place("planner", plannerPrompt(goal));
