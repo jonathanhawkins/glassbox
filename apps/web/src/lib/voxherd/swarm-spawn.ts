@@ -132,8 +132,9 @@ async function spawnAndFind(
   project: string,
   dir: string | undefined,
   known: Set<string>,
+  env: Record<string, string> | undefined,
 ): Promise<string | null> {
-  const r = await spawnSession({ project, dir });
+  const r = await spawnSession({ project, dir, env });
   if (!r.ok) return null;
   for (let i = 0; i < 25; i += 1) {
     await sleep(1000);
@@ -160,12 +161,20 @@ export async function spawnSwarm(opts: {
   // Per-role model + effort: typed into each fresh session as /model + /effort BEFORE its
   // role prompt, so the whole role runs on the chosen brain (defaults in role-models.ts).
   models?: SwarmModels;
+  // Shared task-list id for the whole swarm (CLAUDE_CODE_TASK_LIST_ID). Pass the conductor's
+  // session id so every spawned agent writes to the ONE list the board already polls: the plan
+  // and the workers' completions then live together and the board sees the backlog drain. Without
+  // it each session defaults to its own session-id list and the polled list never completes.
+  taskListId?: string;
   onProgress?: (msg: string) => void;
   // Fires the instant each node's session registers, so the board can map + stream its live
   // terminal immediately instead of waiting for the whole swarm (5-8 sessions) to finish.
   onNode?: (node: string, sessionId: string) => void;
 }): Promise<Record<string, string>> {
-  const { project, dir, goal, workers, models, onProgress, onNode } = opts;
+  const { project, dir, goal, workers, models, taskListId, onProgress, onNode } = opts;
+  // One task list for the whole swarm (see taskListId above): every agent gets the same
+  // CLAUDE_CODE_TASK_LIST_ID so create + complete land in the list the board polls.
+  const env = taskListId ? { CLAUDE_CODE_TASK_LIST_ID: taskListId } : undefined;
   let known: Set<string>;
   try {
     known = new Set((await fetchSessions()).map((s) => s.session_id));
@@ -176,7 +185,7 @@ export async function spawnSwarm(opts: {
 
   const place = async (node: string, prompt: string) => {
     onProgress?.(`spawning ${node}…`);
-    const sid = await spawnAndFind(project, dir, known);
+    const sid = await spawnAndFind(project, dir, known, env);
     if (!sid) return;
     map[node] = sid;
     // Name it at the voxherd level (no-op on older bridge builds) and tell the caller NOW so the

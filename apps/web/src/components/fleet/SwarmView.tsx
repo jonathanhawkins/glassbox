@@ -840,6 +840,10 @@ export function SwarmView() {
           goal: goal.trim(),
           workers,
           models: swarmModels,
+          // Every agent shares ONE task list = the conductor's session id, which taskKeys already
+          // polls first. So the plan and the workers' completions land together and the board sees
+          // the backlog actually drain (Sweep) instead of the planner's list staying pending.
+          taskListId: conductor.session_id,
           onProgress: setNote,
           // Map + tag each node the instant it is alive, so its live terminal is clickable right
           // away instead of after the whole swarm finishes spawning.

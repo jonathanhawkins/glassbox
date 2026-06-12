@@ -69,6 +69,11 @@ export async function spawnSession(opts: {
   dir?: string;
   assistant?: string;
   prompt?: string;
+  // Extra environment for the spawned session (the bridge launches `claude` with it). Used to
+  // share ONE task list across a swarm: CLAUDE_CODE_TASK_LIST_ID = the conductor's session id, so
+  // the planner's plan and the workers' completions land in the one list the board polls. Bridges
+  // that don't read `env` ignore it (pydantic drops unknown fields), so it is safe to always send.
+  env?: Record<string, string>;
 }): Promise<{ ok: boolean; tmuxSession?: string; error?: string }> {
   const token = await getToken();
   return new Promise((resolve) => {
@@ -94,6 +99,7 @@ export async function spawnSession(opts: {
       if (opts.dir) msg.dir = opts.dir;
       if (opts.assistant) msg.assistant = opts.assistant;
       if (opts.prompt) msg.prompt = opts.prompt;
+      if (opts.env) msg.env = opts.env;
       void signed(token, msg).then((m) => {
         try {
           ws.send(m);
