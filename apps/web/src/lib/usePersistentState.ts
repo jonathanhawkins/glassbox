@@ -12,7 +12,10 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 export function usePersistentState<T>(
-  key: string,
+  // Pass null to opt out of persistence entirely (plain useState behavior). This keeps the
+  // rules-of-hooks satisfied for components whose persistence is an OPTIONAL prop (e.g. the
+  // rail sections persist on /swarm but not where the same component renders elsewhere).
+  key: string | null,
   initial: T,
   // Optional validator/merger for the parsed stored value (e.g. merge a saved config over
   // current defaults so a shape change never resurrects stale or partial state).
@@ -21,6 +24,7 @@ export function usePersistentState<T>(
   const [value, setValue] = useState<T>(initial);
 
   useEffect(() => {
+    if (key === null) return;
     try {
       const raw = window.localStorage.getItem(key);
       if (raw === null) return;
@@ -43,10 +47,12 @@ export function usePersistentState<T>(
         // Persisting inside the updater keeps write-after-read ordering exact for
         // functional updates. React may re-run updaters (StrictMode dev), which just
         // rewrites the same value: idempotent and harmless.
-        try {
-          window.localStorage.setItem(key, JSON.stringify(next));
-        } catch {
-          /* storage full or disabled: state still works for this session */
+        if (key !== null) {
+          try {
+            window.localStorage.setItem(key, JSON.stringify(next));
+          } catch {
+            /* storage full or disabled: state still works for this session */
+          }
         }
         return next;
       });

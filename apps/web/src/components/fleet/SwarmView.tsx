@@ -1408,7 +1408,13 @@ export function SwarmView() {
                 &#10217;
               </button>
             </div>
-            <ArchetypeRail onRun={runSwarm} disabled={!conductor} goal={realGoal} defaultOpen={false} />
+            <ArchetypeRail
+              onRun={runSwarm}
+              disabled={!conductor}
+              goal={realGoal}
+              defaultOpen={false}
+              persistKey="glassbox-swarm-shapes-open-v1"
+            />
             {/* Activity log: the swarm's running narrative (sub-agent dispatches + completions,
                 agent mail, the loop stepping), newest first. The temporal companion to the
                 board, so it gets the prime space in the rail. */}
@@ -1441,7 +1447,11 @@ export function SwarmView() {
               {activityOpen && <ActivityFeed entries={activity} onSelect={onSelectActivity} />}
             </div>
             <div className="mt-4 flex min-h-0 flex-[2] flex-col border-t border-line pt-3">
-              <SkillsMenu onGive={giveSkill} disabled={!conductor} />
+              <SkillsMenu
+                onGive={giveSkill}
+                disabled={!conductor}
+                persistKey="glassbox-swarm-skills-open-v1"
+              />
             </div>
           </aside>
         ) : (

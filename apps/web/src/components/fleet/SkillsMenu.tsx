@@ -11,18 +11,23 @@ import { startTransition, useEffect, useState } from "react";
 
 import { CollapseButton } from "@/components/cockpit/CollapseButton";
 import { listPackages, type SkillPackage } from "@/lib/skillvault/client";
+import { usePersistentState } from "@/lib/usePersistentState";
 
 export function SkillsMenu({
   onGive,
   disabled,
+  persistKey,
 }: {
   onGive: (p: SkillPackage) => void;
   disabled?: boolean;
+  // When provided, the collapse state persists under this localStorage key (the swarm rail
+  // remembers it across refreshes); omitted, it is per-mount state as before.
+  persistKey?: string;
 }) {
   const [q, setQ] = useState("");
   const [pkgs, setPkgs] = useState<SkillPackage[]>([]);
   const [err, setErr] = useState("");
-  const [sectionOpen, setSectionOpen] = useState(true);
+  const [sectionOpen, setSectionOpen] = usePersistentState(persistKey ?? null, true);
 
   useEffect(() => {
     let alive = true;
@@ -66,7 +71,14 @@ export function SkillsMenu({
             </span>
           )}
         </div>
-        <span className="text-[10px] text-ink-dim">from skillvault</span>
+        <a
+          href="https://skillvault.md/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[10px] text-accent transition-colors hover:text-accent/80"
+        >
+          from skillvault.md
+        </a>
       </div>
       {sectionOpen && (
         <div className="flex min-h-0 flex-1 flex-col">

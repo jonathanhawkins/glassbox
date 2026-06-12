@@ -9,12 +9,14 @@ import { useState } from "react";
 
 import { CollapseButton } from "@/components/cockpit/CollapseButton";
 import { ARCHETYPES, type Archetype } from "@/lib/fleet/archetypes";
+import { usePersistentState } from "@/lib/usePersistentState";
 
 export function ArchetypeRail({
   onRun,
   disabled,
   goal: goalProp,
   defaultOpen = true,
+  persistKey,
 }: {
   onRun: (a: Archetype, goal: string) => void;
   disabled?: boolean;
@@ -23,10 +25,13 @@ export function ArchetypeRail({
   // Start the shapes list collapsed where the rail shares space with other panels (the swarm
   // rail puts the activity log below it, so loop shapes folds away to give the log room).
   defaultOpen?: boolean;
+  // When provided, the collapse state persists under this localStorage key (the swarm rail
+  // remembers it across refreshes); omitted, it is per-mount state as before.
+  persistKey?: string;
 }) {
   const [goalState, setGoalState] = useState("");
   const [open, setOpen] = useState("");
-  const [sectionOpen, setSectionOpen] = useState(defaultOpen);
+  const [sectionOpen, setSectionOpen] = usePersistentState(persistKey ?? null, defaultOpen);
   const controlled = goalProp !== undefined;
   const goal = controlled ? goalProp : goalState;
   // Once a goal exists the rail comes alive: the Run buttons light up so it is obvious you can
