@@ -1171,7 +1171,10 @@ export function SwarmView() {
       torndownRef.current = false; // re-arm while a loop (kernel or real) is running
       return;
     }
-    const done = loop?.reason === "done" || realStop.reason === "done";
+    // Kernel loops tear down only on "done" (manual stop / max-rounds keep the swarm). The
+    // real-swarm shape monitor's reasons are all terminal stop conditions: Sweep's "done"
+    // (backlog drained) AND Climb's "plateau" (metric stalled) both land the run.
+    const done = loop?.reason === "done" || realStop.reason === "done" || realStop.reason === "plateau";
     if (done && !torndownRef.current && Object.keys(nodeSessions).length) {
       torndownRef.current = true;
       void teardownSwarm();
