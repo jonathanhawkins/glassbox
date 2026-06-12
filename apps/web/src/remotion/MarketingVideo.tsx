@@ -562,6 +562,7 @@ function BoardScene() {
   const LINES = [
     "planner: plan ready, tasks 1-4",
     "coordinator: assign task 2 → worker-2",
+    "agent mail: worker-1 leases src/lib.rs",
     "worker-1 done task 1: verified",
     "validator: tasks 1-4 verified green",
   ];
@@ -570,11 +571,14 @@ function BoardScene() {
       <AbsoluteFill style={{ padding: "90px 110px" }}>
         <Kicker style={head}>the board is not an animation</Kicker>
         <div style={{ ...head, marginTop: 18, fontFamily: SANS, fontSize: 64, fontWeight: 750, color: T.ink }}>
-          It reads the swarm&apos;s real task lists and mail.
+          It reads the swarm&apos;s real Beads and Agent Mail.
+        </div>
+        <div style={{ ...head, marginTop: 16, fontFamily: MONO, fontSize: 25, color: T.inkDim }}>
+          the work graph lives in Beads · messages and file leases ride Agent Mail
         </div>
         {/* columns */}
-        <div style={{ position: "absolute", left: BACKLOG_X + 110, top: 280, ...colLabel }}>backlog</div>
-        <div style={{ position: "absolute", left: DOCK_X[0] + 110, top: 280, ...colLabel }}>
+        <div style={{ position: "absolute", left: BACKLOG_X + 110, top: 332, ...colLabel }}>backlog</div>
+        <div style={{ position: "absolute", left: DOCK_X[0] + 110, top: 332, ...colLabel }}>
           worker docks
           <span
             style={{
@@ -590,7 +594,7 @@ function BoardScene() {
             ✉ {mailCount}
           </span>
         </div>
-        <div style={{ position: "absolute", left: DONE_X + 110, top: 280, ...colLabel }}>done rail</div>
+        <div style={{ position: "absolute", left: DONE_X + 110, top: 332, ...colLabel }}>done rail</div>
         <div style={{ position: "absolute", left: 110, top: 60 }}>
           {BEADS.map((b) => (
             <Bead key={b.id} {...b} />
@@ -625,7 +629,7 @@ function ActivityLine({ text, delay }: { text: string; delay: number }) {
 }
 
 // --- scene 6: close -----------------------------------------------------------------------
-const STACK = ["Claude Code swarms", "Redis live bus", "Weights & Biases Weave"];
+const STACK = ["Claude Code swarms", "Beads + Agent Mail", "Redis live bus", "Weights & Biases Weave"];
 
 function Close() {
   const frame = useCurrentFrame();
