@@ -5,6 +5,7 @@
 // animations, per Remotion rules) and every style is inline (no Tailwind) so the
 // same composition renders in the in-app <Player> AND through the Remotion CLI.
 
+import { Audio } from "@remotion/media";
 import React from "react";
 import {
   AbsoluteFill,
@@ -12,6 +13,7 @@ import {
   Sequence,
   interpolate,
   spring,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
@@ -698,10 +700,39 @@ function StackPill({ text, delay }: { text: string; delay: number }) {
 }
 
 // --- the composition ------------------------------------------------------------------------
+// Music sits under the narration the whole way (the Eleven Music underscore carries its own
+// build), fading in over the first 20 frames and out over the last 4 seconds. Each scene's
+// voiceover starts a few frames after its visuals land, so the headline always hits first.
+const MUSIC_VOLUME = 0.28;
+
 export function MarketingVideo() {
   return (
     <AbsoluteFill style={{ backgroundColor: T.canvas }}>
       <DotGrid />
+      <Audio
+        src={staticFile("music/underscore.mp3")}
+        volume={(f) =>
+          interpolate(f, [0, 20, CLOSE_END - 120, CLOSE_END], [0, MUSIC_VOLUME, MUSIC_VOLUME, 0], clamp)
+        }
+      />
+      <Sequence from={10}>
+        <Audio src={staticFile("vo/open.mp3")} />
+      </Sequence>
+      <Sequence from={OPEN_END + 8}>
+        <Audio src={staticFile("vo/roles.mp3")} />
+      </Sequence>
+      <Sequence from={ROLES_END + 8}>
+        <Audio src={staticFile("vo/models.mp3")} />
+      </Sequence>
+      <Sequence from={MODELS_END + 8}>
+        <Audio src={staticFile("vo/loops.mp3")} />
+      </Sequence>
+      <Sequence from={LOOPS_END + 8}>
+        <Audio src={staticFile("vo/board.mp3")} />
+      </Sequence>
+      <Sequence from={BOARD_END + 6}>
+        <Audio src={staticFile("vo/close.mp3")} />
+      </Sequence>
       <Sequence durationInFrames={OPEN_END}>
         <Open />
       </Sequence>
