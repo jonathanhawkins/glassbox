@@ -27,6 +27,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.476",
     "@tailwindcss/postcss": "^4",
     "@tldraw/tlschema": "5.1.0",
     "@types/node": "^20",
