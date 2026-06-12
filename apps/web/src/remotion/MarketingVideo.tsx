@@ -218,6 +218,7 @@ function RoleCard({
 
 function Roles() {
   const head = useRise(4);
+  const account = useRise(34);
   const frame = useCurrentFrame();
   const wire = interpolate(frame, [16, 70], [0, 1], { ...clamp, easing: EASE });
   return (
@@ -229,6 +230,10 @@ function Roles() {
         </div>
         <div style={{ marginTop: 16, fontFamily: MONO, fontSize: 25, color: T.inkDim, ...head }}>
           every node is a live Claude Code session in tmux
+        </div>
+        <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 25, ...account }}>
+          <span style={{ color: T.inkMid }}>no API keys, no special setup. </span>
+          <span style={{ color: T.accentBright }}>your normal Claude Code account does the work.</span>
         </div>
         {/* spine wire */}
         <svg
