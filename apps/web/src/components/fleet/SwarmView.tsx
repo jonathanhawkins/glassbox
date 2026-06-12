@@ -306,18 +306,28 @@ export function SwarmView() {
   // ------------------------------------------------------------------------------------
 
   // Where the swarm's task list actually lives. Each session writes to its OWN list (keyed by
-  // session id, not project name), so the canonical plan is under the planner's session for a
-  // spawned swarm, the conductor's session for an in-session rail loop, or the project name for a
-  // legacy run. The board + counts read whichever holds tasks (fetchSwarmTasks tries them in
-  // this order). Without this the board polled /api/tasks/{project}, which is empty for a spawned
-  // swarm, so the plan never appeared.
-  const taskKeys = useMemo(
-    () =>
-      [nodeSessions["planner"], conductor?.session_id, conductor?.project].filter(
-        Boolean,
-      ) as string[],
-    [nodeSessions, conductor?.session_id, conductor?.project],
-  );
+  // session id, not project name) and the canonical plan's home VARIES per run: usually the
+  // planner's list, but a live run showed the planner mailing the plan while the COORDINATOR
+  // held the only task list (workers keep mirrors). So the poll tries every roster node, most
+  // canonical first, then the conductor and the legacy project key; fetchSwarmTasks takes the
+  // first non-empty. Too narrow a list here means counts read 0 mid-run and the Sweep monitor
+  // loses its backlog denominator (the auto-stop never fires).
+  const taskKeys = useMemo(() => {
+    const workers = Object.entries(nodeSessions)
+      .filter(([node]) => node.startsWith("worker"))
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, sid]) => sid);
+    const ordered = [
+      nodeSessions["planner"],
+      nodeSessions["coordinator"],
+      ...workers,
+      nodeSessions["validator"],
+      nodeSessions["improver"],
+      conductor?.session_id,
+      conductor?.project,
+    ].filter(Boolean) as string[];
+    return [...new Set(ordered)];
+  }, [nodeSessions, conductor?.session_id, conductor?.project]);
 
   // Counts the board/gauge/Sweep-monitor read. MAIL-aware: a spawned swarm completes in each
   // agent's own task list (the polled planner list never drains), but it ANNOUNCES completion over
