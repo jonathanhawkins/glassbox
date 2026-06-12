@@ -13,7 +13,8 @@ import { useSearchParams } from "next/navigation";
 import type { Editor } from "tldraw";
 import type { GlassboxEvent } from "@glassbox/contract";
 
-import { sendCommand } from "@/lib/voxherd/client";
+import { sendCommand, submitSession } from "@/lib/voxherd/client";
+import { fetchSwarmTasks } from "@/lib/voxherd/swarm-adapter";
 import type { VoxSession } from "@/lib/voxherd/types";
 import { openTerminalStream, killSession } from "@/lib/voxherd/ws";
 import { spawnSwarm, conductorBlueprint } from "@/lib/voxherd/swarm-spawn";
@@ -33,6 +34,7 @@ import {
   reviveSwarmModels,
   type SwarmModels,
 } from "@/lib/voxherd/role-models";
+import { routeMailToWorkers, tallyMailCounts } from "@/lib/voxherd/mail-route";
 import { usePersistentState } from "@/lib/usePersistentState";
 import {
   LoopShapeContext,
@@ -238,6 +240,20 @@ export function SwarmView() {
   }
   // ------------------------------------------------------------------------------------
 
+  // Where the swarm's task list actually lives. Each session writes to its OWN list (keyed by
+  // session id, not project name), so the canonical plan is under the planner's session for a
+  // spawned swarm, the conductor's session for an in-session rail loop, or the project name for a
+  // legacy run. The board + counts read whichever holds tasks (fetchSwarmTasks tries them in
+  // this order). Without this the board polled /api/tasks/{project}, which is empty for a spawned
+  // swarm, so the plan never appeared.
+  const taskKeys = useMemo(
+    () =>
+      [nodeSessions["planner"], conductor?.session_id, conductor?.project].filter(
+        Boolean,
+      ) as string[],
+    [nodeSessions, conductor?.session_id, conductor?.project],
+  );
+
   const counts = useMemo(() => {
     const vals = Object.values(tasks);
     const st = (t: { status?: string }) => (t.status ?? "").toLowerCase();
@@ -325,41 +341,31 @@ export function SwarmView() {
     return () => cancelAnimationFrame(r);
   }, [lines, consoleOpen]);
 
-  // Poll the conductor's task list so a bead click can show what that work actually is.
+  // Poll the swarm's task list (from whichever session key holds the canonical plan, see
+  // taskKeys) so the header counts, bead detail, and recorded results stay live.
   useEffect(() => {
-    if (!conductor?.project) return; // tasks cleared during render when the project goes away
-    const project = conductor.project;
+    const project = conductor?.project;
+    if (!project || taskKeys.length === 0) return;
     let alive = true;
     const tick = async () => {
-      try {
-        const res = await fetch(
-          `/api/voxherd/api/tasks/${encodeURIComponent(project)}`,
-          { cache: "no-store" },
-        );
-        const data = (await res.json()) as
-          | { tasks?: { id: string | number; subject?: string; description?: string; status?: string }[] }
-          | { id: string | number; subject?: string; description?: string; status?: string }[];
-        const list = Array.isArray(data) ? data : (data.tasks ?? []);
-        if (!alive) return;
-        const byId: Record<string, { subject?: string; description?: string; status?: string }> = {};
-        for (const t of list) {
-          const id = String(t.id);
-          byId[id] = t;
-          // Keep our own copy so the bead and its recorded result persist after the run and
-          // across reloads, even if voxherd later drops the task. For a completed task the
-          // description carries the RESULT (the cycle TaskUpdates it before closing).
-          swarmCache.recordBead(project, {
-            id,
-            kind: "task",
-            title: t.subject ?? `task ${id}`,
-            description: t.description,
-            status: t.status ?? "pending",
-          });
-        }
-        setTasks(byId);
-      } catch {
-        /* keep last */
+      const { tasks: list } = await fetchSwarmTasks(taskKeys);
+      if (!alive) return;
+      const byId: Record<string, { subject?: string; description?: string; status?: string }> = {};
+      for (const t of list) {
+        const id = String(t.id);
+        byId[id] = { subject: t.subject, description: t.description, status: t.status };
+        // Keep our own copy so the bead and its recorded result persist after the run and
+        // across reloads, even if voxherd later drops the task. For a completed task the
+        // description carries the RESULT (the cycle TaskUpdates it before closing).
+        swarmCache.recordBead(project, {
+          id,
+          kind: "task",
+          title: t.subject ?? `task ${id}`,
+          description: t.description,
+          status: t.status ?? "pending",
+        });
       }
+      setTasks(byId);
     };
     void tick();
     const id = setInterval(tick, 2000);
@@ -367,7 +373,7 @@ export function SwarmView() {
       alive = false;
       clearInterval(id);
     };
-  }, [conductor?.project]);
+  }, [conductor?.project, taskKeys]);
 
   // A bead click on the board dispatches glassbox:bead-click; open a task-detail card.
   useEffect(() => {
@@ -524,20 +530,7 @@ export function SwarmView() {
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller) return;
-    const workerOf = (s: string): string | null => {
-      const w = s.match(/worker[\s-]?([1-4])/i);
-      return w ? `worker-${w[1]}` : null;
-    };
-    const nameToWorker: Record<string, string> = {};
-    for (const m of mail) {
-      const w = workerOf(m.subject);
-      if (w) nameToWorker[m.from] = w;
-    }
-    const counts: Record<string, number> = {};
-    for (const m of mail) {
-      const w = nameToWorker[m.from] ?? workerOf(m.subject);
-      if (w) counts[w] = (counts[w] ?? 0) + 1;
-    }
+    const counts = tallyMailCounts(mail);
     for (let i = 1; i <= 4; i += 1) {
       const worker = `worker-${i}`;
       controller.setMailCount(worker, counts[worker] ?? 0);
@@ -554,23 +547,17 @@ export function SwarmView() {
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller || !mail.length) return;
-    const ordered = [...mail].reverse(); // mail arrives newest-first; emit oldest-first
-    for (const m of ordered) {
-      const w = m.subject.match(/worker[\s_-]?([1-4])/i);
-      const t = m.subject.match(/task[\s#:_-]*(\d+)/i);
-      if (!w || !t) continue;
-      const worker = `worker-${w[1]}`;
-      const taskId = t[1];
-      if (mailRouteRef.current.get(taskId) === worker) continue;
-      mailRouteRef.current.set(taskId, worker);
+    // routeMailToWorkers scans oldest-first, latest-signal-wins, and mutates the dedup ref so a
+    // (task, worker) pair already emitted on a prior poll is skipped here.
+    for (const route of routeMailToWorkers(mail, mailRouteRef.current)) {
       controller.apply({
         ts: Date.now(),
         type: "bead_claimed",
         run_id: "mail-route",
         planner_version: 1,
-        agent: worker,
-        bead_id: `task-${taskId}`,
-        title: tasks[taskId]?.subject ?? m.subject,
+        agent: route.worker,
+        bead_id: `task-${route.taskId}`,
+        title: tasks[route.taskId]?.subject ?? route.subject,
         payload: { capability: "task" },
       } as GlassboxEvent);
     }
@@ -732,6 +719,13 @@ export function SwarmView() {
         session_id: conductor.session_id,
         message,
       });
+      // A multi-line message (the spawn blueprint) lands as a HELD bracketed paste; fire a
+      // separate Enter to submit it or the conductor sits on an unsent prompt and never
+      // orchestrates. Single-line chat already submits, so skip the follow-up there.
+      if (r.ok && message.includes("\n")) {
+        await new Promise((res) => setTimeout(res, 500));
+        await submitSession({ project: conductor.project, session_id: conductor.session_id });
+      }
       setNote(r.ok ? "sent" : `failed: ${r.error ?? "?"}`);
       return r.ok;
     },
@@ -1057,7 +1051,7 @@ export function SwarmView() {
             <SwarmBoard
               key={conductor.session_id}
               sessionId={conductor.session_id}
-              project={conductor.project}
+              taskKeys={taskKeys}
               onReady={onBoardReady}
               onEvent={onBoardEvent}
               workers={workers}

@@ -44,3 +44,18 @@ export async function sendCommand(input: {
   });
   return (await res.json().catch(() => ({ error: "bad_response" }))) as CommandResult;
 }
+
+/**
+ * Submit a held bracketed paste. A MULTI-LINE message sent via sendCommand arrives in the
+ * session as a bracketed paste that Claude Code holds (shown as "[Pasted text +N lines]") until
+ * a SEPARATE Enter; the bridge's own trailing Enter lands inside the paste bracket and so does
+ * not submit it. A lone space sent as its OWN command appends harmlessly and its Enter closes
+ * the bracket and submits. (An empty message can't be used: the bridge rejects it with "project
+ * and message are required".) Single-line messages submit on their own and need no follow-up.
+ */
+export async function submitSession(input: {
+  project: string;
+  session_id?: string;
+}): Promise<CommandResult> {
+  return sendCommand({ ...input, message: " " });
+}

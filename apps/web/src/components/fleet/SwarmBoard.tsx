@@ -28,26 +28,30 @@ const TL_COMPONENTS: TLComponents = {
 
 export function SwarmBoard({
   sessionId,
-  project,
+  taskKeys,
   onReady,
   onEvent,
   workers = 4,
 }: {
   sessionId: string;
-  project: string;
+  // Candidate task-list keys in priority order (planner session, conductor session, project).
+  // The board reads whichever holds the canonical plan; see swarm-adapter.fetchSwarmTasks.
+  taskKeys: string[];
   onReady?: (editor: Editor, controller: BoardController) => void;
   onEvent?: (ev: GlassboxEvent) => void;
   workers?: number;
 }) {
   const controllerRef = useRef<BoardController | null>(null);
-  // Latest-ref pattern: keep the newest onEvent/workers reachable from the
+  // Latest-ref pattern: keep the newest onEvent/workers/taskKeys reachable from the
   // adapter callback below WITHOUT re-subscribing on every render. Assigned in
   // an effect (not the render body) so render stays pure.
   const onEventRef = useRef(onEvent);
   const workersRef = useRef(workers);
+  const taskKeysRef = useRef(taskKeys);
   useEffect(() => {
     onEventRef.current = onEvent;
     workersRef.current = workers;
+    taskKeysRef.current = taskKeys;
   });
   const [ready, setReady] = useState(false);
 
@@ -68,11 +72,11 @@ export function SwarmBoard({
   );
 
   useEffect(() => {
-    if (!ready || !controllerRef.current || !sessionId || !project) return;
+    if (!ready || !controllerRef.current || !sessionId) return;
     const controller = controllerRef.current;
     const stop = startSwarmAdapter({
       sessionId,
-      project,
+      getKeys: () => taskKeysRef.current,
       workers: workersRef.current,
       onEvent: (ev) => {
         controller.apply(ev);
@@ -80,7 +84,7 @@ export function SwarmBoard({
       },
     });
     return stop;
-  }, [ready, sessionId, project]);
+  }, [ready, sessionId]);
 
   // Reflect the chosen worker count on the board (dim the inactive lanes) when it changes.
   useEffect(() => {

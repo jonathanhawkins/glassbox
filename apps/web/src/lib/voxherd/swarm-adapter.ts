@@ -2,37 +2,91 @@
 // GlassboxEvent vocabulary. The board runs in REAL mode (no simulated status side-effects),
 // so it renders only what the data actually says.
 //
-// Source: the conductor's Claude Code task list (GET /api/tasks/{project}). These tasks carry
-// NO owner/assignee field (verified: keys are id/subject/description/status/activeForm/
-// blocks/blockedBy), so we show them honestly as the conductor's active QUEUE (backlog beads,
-// capped + newest-first for legibility) and move a bead to "done" when its task completes. This
-// adapter does NOT route tasks to worker lanes (the task list has no data for "worker-N owns
-// task X"); SwarmView routes them instead from the swarm's REAL Agent Mail, whose protocol
-// subjects ("assign task 14 -> worker-2: ...") genuinely carry ownership. Worker/validator/
-// improver lane statuses light up from real session activity via agent_status events.
+// Source: the swarm's Claude Code task list. Each session writes to its OWN list (keyed by
+// session id, NOT project name), so the canonical plan lives under the planner's session for a
+// spawned swarm, the conductor's for an in-session rail loop, and the project name for a legacy
+// run. fetchSwarmTasks() resolves whichever holds it. The tasks carry no assignee field, so we
+// show them as the backlog (capped, newest-first) and slide a bead to "done" when its task
+// completes; SwarmView routes the backlog beads onto worker lanes from the swarm's REAL Agent
+// Mail ("assign task 14 -> worker-2: ..."), which genuinely carries ownership.
 
 import type { GlassboxEvent } from "@glassbox/contract";
 
-const MAX_ACTIVE = 16;
+export const MAX_ACTIVE = 16;
 const ACTIVE = new Set(["pending", "in_progress", "claimed", "blocked"]);
 const COMPLETE = new Set(["completed", "done"]);
 
-interface SwarmTask {
+export interface SwarmTask {
   id: string | number;
   subject?: string;
+  description?: string;
   activeForm?: string;
   status?: string;
 }
 
-const norm = (s?: string) => (s ?? "pending").toLowerCase().replace(/\s+/g, "_");
+/** Normalize a raw task status: default missing to "pending", lowercase, collapse spaces to "_". */
+export const norm = (s?: string) => (s ?? "pending").toLowerCase().replace(/\s+/g, "_");
+
+/** True when a task's (normalized) status puts it in the active backlog. */
+export function isActive(status?: string): boolean {
+  return ACTIVE.has(norm(status));
+}
+
+/** True when a task's (normalized) status means it has left the queue as done. */
+export function isComplete(status?: string): boolean {
+  return COMPLETE.has(norm(status));
+}
+
+/**
+ * The conductor's active backlog as the board shows it: keep only active-status tasks, newest
+ * first (numeric id desc), capped at MAX_ACTIVE for legibility. Pure; the exact filter/sort/cap
+ * the adapter's tick applies, lifted out so it can be unit tested.
+ */
+export function selectActiveTasks<T extends { id: string | number; status?: string }>(
+  tasks: readonly T[],
+): T[] {
+  return tasks
+    .filter((t) => isActive(t.status))
+    .sort((a, b) => Number(b.id) - Number(a.id))
+    .slice(0, MAX_ACTIVE);
+}
+
+/**
+ * Resolve the swarm's task list. Each session writes to its OWN task list (keyed by session id,
+ * not project name), so a spawned swarm's plan lives under the planner's session id, an in-session
+ * rail loop under the conductor's, and a legacy run under the project name. We try the candidate
+ * keys in priority order and use the FIRST that has tasks, so the board reads the canonical plan
+ * wherever it landed. Returns the tasks plus the key that won.
+ */
+export async function fetchSwarmTasks(
+  keys: string[],
+): Promise<{ key: string; tasks: SwarmTask[] }> {
+  for (const key of keys) {
+    if (!key) continue;
+    try {
+      const res = await fetch(`/api/voxherd/api/tasks/${encodeURIComponent(key)}`, {
+        cache: "no-store",
+      });
+      const data = (await res.json()) as { tasks?: SwarmTask[] } | SwarmTask[];
+      const tasks = Array.isArray(data) ? data : (data.tasks ?? []);
+      if (tasks.length) return { key, tasks };
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return { key: "", tasks: [] };
+}
 
 export function startSwarmAdapter(opts: {
   sessionId: string;
-  project: string;
+  // Candidate task-list keys in priority order (planner session, conductor session, project).
+  // A getter, not a static value, so the adapter picks up the planner key the instant it spawns
+  // without re-subscribing.
+  getKeys: () => string[];
   workers?: number;
   onEvent: (ev: GlassboxEvent) => void;
 }): () => void {
-  const { project, onEvent } = opts;
+  const { getKeys, onEvent } = opts;
   const runId = `swarm-${opts.sessionId}`;
   let alive = true;
   const phaseOf = new Map<string, string>(); // taskId -> "queued" | "done"
@@ -46,23 +100,11 @@ export function startSwarmAdapter(opts: {
   };
 
   const tick = async () => {
-    let tasks: SwarmTask[] = [];
-    try {
-      const res = await fetch(`/api/voxherd/api/tasks/${encodeURIComponent(project)}`, {
-        cache: "no-store",
-      });
-      const data = (await res.json()) as { tasks?: SwarmTask[] } | SwarmTask[];
-      tasks = Array.isArray(data) ? data : (data.tasks ?? []);
-    } catch {
-      return; // transient; keep polling
-    }
+    const { tasks } = await fetchSwarmTasks(getKeys());
     if (!alive) return;
 
-    // The conductor's active tasks = its queue (backlog). Newest first, capped for legibility.
-    const active = tasks
-      .filter((t) => ACTIVE.has(norm(t.status)))
-      .sort((a, b) => Number(b.id) - Number(a.id))
-      .slice(0, MAX_ACTIVE);
+    // The active tasks = the backlog. Newest first, capped for legibility.
+    const active = selectActiveTasks(tasks);
 
     for (const t of active) {
       const id = String(t.id);
@@ -77,7 +119,7 @@ export function startSwarmAdapter(opts: {
     // mode), so bead_done just slides the bead to the done rail.
     for (const t of tasks) {
       const id = String(t.id);
-      if (COMPLETE.has(norm(t.status)) && phaseOf.has(id) && phaseOf.get(id) !== "done") {
+      if (isComplete(t.status) && phaseOf.has(id) && phaseOf.get(id) !== "done") {
         emit("bead_done", "coordinator", { bead_id: `task-${id}`, payload: { capability: "task" } });
         phaseOf.set(id, "done");
       }

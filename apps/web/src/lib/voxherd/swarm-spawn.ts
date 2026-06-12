@@ -9,7 +9,7 @@
 // Returns a node-name -> session_id map so the board can stream each node's OWN live terminal.
 
 import { spawnSession } from "./ws";
-import { fetchSessions, renameSession, sendCommand } from "./client";
+import { fetchSessions, renameSession, sendCommand, submitSession } from "./client";
 import { roleKeyOf, type SwarmModels } from "./role-models";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -183,6 +183,11 @@ export async function spawnSwarm(opts: {
       await sleep(600);
     }
     await sendCommand({ project, session_id: sid, message: prompt });
+    // The role prompt is multi-line, so it lands as a HELD bracketed paste. Fire a separate
+    // Enter to submit it (see submitSession) or the session sits forever on an unsent prompt
+    // and never starts working. Settle first so the paste bracket has closed.
+    await sleep(700);
+    await submitSession({ project, session_id: sid });
   };
 
   await place("planner", plannerPrompt(goal));

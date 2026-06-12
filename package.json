@@ -10,6 +10,7 @@
     "web": "pnpm --filter web dev",
     "backend": "bash scripts/backend.sh",
     "dev": "bash scripts/dev.sh",
-    "smoke": "uv run python scripts/smoke.py"
+    "smoke": "uv run python scripts/smoke.py",
+    "test": "pnpm -r test"
   }
 }
