@@ -22,9 +22,6 @@ swarm runs any of them. We demonstrate three:
 The same planner/coordinator/worker/validator/improver climbs all of them (tokenizer
 ~0.17 to 1.00, textkit 0.52 to 1.00), with zero swarm code changed between tasks.
 
-Built at WeaveHacks 4 (W&B SF). Weave project:
-https://wandb.ai/whitely-white-elk-llc/glassbox/weave
-
 ![cockpit](docs/board-verify.png)
 
 ## Why it wins
