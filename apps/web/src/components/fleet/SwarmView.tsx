@@ -34,7 +34,12 @@ import {
   reviveSwarmModels,
   type SwarmModels,
 } from "@/lib/voxherd/role-models";
-import { routeMailToWorkers, tallyMailCounts, taskStatesFromMail } from "@/lib/voxherd/mail-route";
+import {
+  routeMailToWorkers,
+  tallyMailCounts,
+  taskStatesFromMail,
+  doneTaskIdsFromMail,
+} from "@/lib/voxherd/mail-route";
 import { usePersistentState } from "@/lib/usePersistentState";
 import {
   initSweep,
@@ -143,6 +148,8 @@ export function SwarmView() {
   const seenSubRef = useRef<Set<string>>(new Set());
   // Task id -> worker lane already routed from the mail protocol (dedups bead_claimed emits).
   const mailRouteRef = useRef<Map<string, string>>(new Map());
+  // Task ids already retired to the done rail from worker-less completion mail (dedup).
+  const doneBeadRef = useRef<Set<string>>(new Set());
   // Real-swarm shape monitor: a spawned swarm runs autonomously (no loop kernel), so the cockpit
   // DETECTS the armed shape's stop condition from the live task counts (pure kernel in
   // lib/fleet/loop-monitor). v1 handles Sweep (backlog drained). `realStop.reason` is "" while
@@ -282,13 +289,14 @@ export function SwarmView() {
   // bead retires as the "worker-N done task X" mail lands.
   const counts = useMemo(() => {
     const states = taskStatesFromMail(mail);
+    const doneIds = doneTaskIdsFromMail(mail); // worker-less completions (incl. ranges)
     let working = 0;
     let queued = 0;
     let done = 0;
     for (const [id, t] of Object.entries(tasks)) {
       const st = (t.status ?? "").toLowerCase();
       const mailState = states.get(id);
-      if (mailState === "done" || st === "completed" || st === "done") done += 1;
+      if (doneIds.has(id) || mailState === "done" || st === "completed" || st === "done") done += 1;
       else if (st === "in_progress" || (mailState && mailState !== "done")) working += 1;
       else queued += 1;
     }
@@ -494,6 +502,7 @@ export function SwarmView() {
     seenSubRef.current = new Set();
     prevSubCountRef.current = 0;
     mailRouteRef.current = new Map();
+    doneBeadRef.current = new Set();
   }, [conductorId]);
 
   // Reflect the conductor's REAL sub-agent activity on the board: a bead per sub-agent it
@@ -591,6 +600,27 @@ export function SwarmView() {
       } as GlassboxEvent);
     }
   }, [mail, tasks]);
+
+  // Retire beads to the done rail for completions that name NO worker ("improver confirms tasks
+  // 1-4 done", "validator: tasks 1,2 verified green"). The worker-tagged path above handles
+  // "worker-N done task X"; this catches the freer confirmations so the backlog actually clears.
+  useEffect(() => {
+    const controller = controllerRef.current;
+    if (!controller || !mail.length) return;
+    for (const id of doneTaskIdsFromMail(mail)) {
+      if (doneBeadRef.current.has(id)) continue;
+      doneBeadRef.current.add(id);
+      controller.apply({
+        ts: Date.now(),
+        type: "bead_done",
+        run_id: "mail-done",
+        planner_version: 1,
+        agent: "coordinator",
+        bead_id: `task-${id}`,
+        payload: { capability: "task" },
+      } as GlassboxEvent);
+    }
+  }, [mail]);
 
   // Light up the board's mapped nodes from their REAL spawned sessions' status (Phase B):
   // once a node has a dedicated session, its lane reflects that session, not the task lanes.

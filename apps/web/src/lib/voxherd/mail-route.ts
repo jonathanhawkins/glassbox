@@ -125,6 +125,41 @@ export function taskStatesFromMail(mail: readonly RoutableMail[]): Map<string, s
 }
 
 /**
+ * EVERY task id named in a subject, including ranges and lists, e.g. "task 14" -> [14],
+ * "tasks 1-4 done" -> [1,2,3,4], "tasks 1, 2 and 3" -> [1,2,3]. Completion confirmations are
+ * phrased freely (and often span several tasks at once), so done-detection cannot rely on the
+ * single-task `taskIdOf`. Ranges are capped so a typo can't expand to thousands of ids.
+ */
+export function taskIdsOf(s: string): string[] {
+  const ids = new Set<string>();
+  // Each "task(s) <id-chunk>" occurrence: grab the run of digits / separators that follows.
+  for (const m of s.matchAll(/tasks?\s*#?\s*(\d[\d,\s–-]*)/gi)) {
+    const chunk = m[1];
+    for (const r of chunk.matchAll(/(\d+)\s*[–-]\s*(\d+)/g)) {
+      const a = Number(r[1]);
+      const b = Number(r[2]);
+      if (b >= a && b - a <= 50) for (let i = a; i <= b; i += 1) ids.add(String(i));
+    }
+    for (const r of chunk.replace(/\d+\s*[–-]\s*\d+/g, " ").matchAll(/\d+/g)) ids.add(r[0]);
+  }
+  return [...ids];
+}
+
+/**
+ * The set of task ids the swarm has reported FINISHED over mail, regardless of who said it or how
+ * it was phrased. Unlike the routing parser, this needs NO worker lane: a validator's or improver's
+ * "tasks 1-4 verified green" counts. Used so the backlog drains (and beads retire) even when the
+ * completion confirmation does not follow the strict "worker-N done task X" form.
+ */
+export function doneTaskIdsFromMail(mail: readonly { subject: string }[]): Set<string> {
+  const done = new Set<string>();
+  for (const m of mail) {
+    if (isDoneSubject(m.subject)) for (const id of taskIdsOf(m.subject)) done.add(id);
+  }
+  return done;
+}
+
+/**
  * Tally recent mail into a per-worker-lane message count for the lane badges. A sender's lane is
  * learned from any of its messages that names a worker (the last such message wins), so that
  * sender's OTHER messages (which may not name a worker) count toward the same lane. A sender whose

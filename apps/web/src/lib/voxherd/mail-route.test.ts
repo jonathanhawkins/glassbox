@@ -6,9 +6,11 @@ import {
   workerInRoute,
   workerInSubject,
   taskIdOf,
+  taskIdsOf,
   isDoneSubject,
   routeMailToWorkers,
   taskStatesFromMail,
+  doneTaskIdsFromMail,
   tallyMailCounts,
   type MailRoute,
 } from "./mail-route.ts";
@@ -218,6 +220,31 @@ test("taskStatesFromMail lets a later completion override an earlier assignment 
 test("taskStatesFromMail ignores non-routable subjects", () => {
   const states = taskStatesFromMail([{ subject: "standup at noon" }, { subject: "build passed" }]);
   assert.equal(states.size, 0);
+});
+
+// --- taskIdsOf / doneTaskIdsFromMail: free-form completions, ranges, worker-less ------------
+
+test("taskIdsOf reads single ids, ranges, and lists", () => {
+  assert.deepEqual(taskIdsOf("worker-2 done task 14: built"), ["14"]);
+  assert.deepEqual(taskIdsOf("improver confirms tasks 1-4 done").sort(), ["1", "2", "3", "4"]);
+  assert.deepEqual(taskIdsOf("tasks 1–3 verified green").sort(), ["1", "2", "3"]); // en-dash
+  assert.deepEqual(taskIdsOf("tasks 1, 2, 3 passing").sort(), ["1", "2", "3"]);
+  assert.deepEqual(taskIdsOf("no task numbers here"), []);
+});
+
+test("taskIdsOf caps a runaway range so a typo can't expand to thousands", () => {
+  assert.deepEqual(taskIdsOf("task 1-9999 done"), []); // range too wide -> dropped
+});
+
+test("doneTaskIdsFromMail collects finished ids regardless of who said it or the phrasing", () => {
+  const mail = [
+    { subject: "improver confirms tasks 1-4 done" }, // worker-less, a range
+    { subject: "assign task 7 -> worker-2: parse" }, // not a completion
+    { subject: "validator: task 9 verified green" }, // worker-less single
+  ];
+  const done = doneTaskIdsFromMail(mail);
+  assert.deepEqual([...done].sort(), ["1", "2", "3", "4", "9"]);
+  assert.equal(done.has("7"), false); // an assignment is not a completion
 });
 
 // --- tallyMailCounts: a sender's lane is learned from any worker-naming subject -------------
