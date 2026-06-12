@@ -26,6 +26,10 @@ export interface MailRoute {
   worker: string; // "worker-1".."worker-4"
   taskId: string;
   subject: string; // the subject that produced the route (bead title fallback)
+  // True when the subject REPORTS the task finished ("worker-1 done task 2", "task 72 verified
+  // green") rather than assigning it. The worker marks completion in its OWN task list, not the
+  // planner's, so this mail is the board's only signal to retire the bead to the done rail.
+  done: boolean;
 }
 
 // Route parser: the worker id may be separated by space, hyphen, OR underscore.
@@ -34,6 +38,9 @@ const ROUTE_WORKER_RE = /worker[\s_-]?([1-4])/i;
 // narrower than the route parser; see the note at the top of the file.
 const COUNT_WORKER_RE = /worker[\s-]?([1-4])/i;
 const TASK_RE = /task[\s#:_-]*(\d+)/i;
+// Completion vocabulary: a subject reports a task FINISHED (not merely assigned/claimed). Kept
+// deliberately broad because workers phrase it freely ("done", "verified green", "tests passing").
+const DONE_RE = /\b(done|verified|complete|completed|pass(?:ed|es|ing)?|green|landed|shipped|merged|resolved|closed)\b/i;
 
 /** The worker lane named in a routing subject, or null. Accepts "worker-2","Worker 3","worker_4". */
 export function workerInRoute(s: string): string | null {
@@ -53,33 +60,46 @@ export function taskIdOf(s: string): string | null {
   return m ? m[1] : null;
 }
 
+/** True when a subject REPORTS a task as finished (vs merely assigning or claiming it). */
+export function isDoneSubject(s: string): boolean {
+  return DONE_RE.test(s);
+}
+
 /** Parse one subject into a route, or null unless it names BOTH a worker (1-4) and a task id. */
 export function parseMailRoute(subject: string): MailRoute | null {
   const worker = workerInRoute(subject);
   const taskId = taskIdOf(subject);
   if (!worker || !taskId) return null;
-  return { worker, taskId, subject };
+  return { worker, taskId, subject, done: isDoneSubject(subject) };
 }
 
 /**
- * Route a freshly fetched inbox onto worker lanes. Agent Mail delivers newest-first, so we scan
- * oldest-first and let the latest signal win a task's lane: if a task is reassigned, both routes
- * are returned (newest last) so a caller applying them in order lands on the newest worker.
+ * Route a freshly fetched inbox onto the lanes. Each task is reduced to its CURRENT state from
+ * its NEWEST routable subject (Agent Mail delivers newest-first), then we emit a transition only
+ * if that state changed since the last poll. A task's state is "done" once a completion subject is
+ * its newest signal, else its owning worker lane. So: assign -> the bead is claimed onto a worker;
+ * a later done -> the bead is retired; a reopen after done -> it is re-claimed. Reducing per task
+ * (rather than per message) is what makes it idempotent: re-polling a batch that already holds both
+ * an assign and a done settles on the newest (done) and does not oscillate.
  *
- * `seen` is the caller's task -> worker dedup map, MUTATED in place: a subject that merely restates
- * an existing (task, worker) pair is skipped so the same bead is not re-emitted on the next poll.
- * Carrying `seen` across polls is what makes this idempotent for the SwarmView effect.
+ * `seen` is the caller's task -> state map, MUTATED in place and carried across polls. Routes are
+ * returned oldest-task-first so a caller applying them in order moves chronologically.
  */
 export function routeMailToWorkers(
   mail: readonly RoutableMail[],
   seen: Map<string, string>,
 ): MailRoute[] {
-  const routes: MailRoute[] = [];
-  for (const m of [...mail].reverse()) {
+  // Newest-first scan: the first routable subject seen for a task is its newest = current signal.
+  const latest = new Map<string, MailRoute>();
+  for (const m of mail) {
     const route = parseMailRoute(m.subject);
-    if (!route) continue;
-    if (seen.get(route.taskId) === route.worker) continue;
-    seen.set(route.taskId, route.worker);
+    if (route && !latest.has(route.taskId)) latest.set(route.taskId, route);
+  }
+  const routes: MailRoute[] = [];
+  for (const route of [...latest.values()].reverse()) {
+    const state = route.done ? "done" : route.worker;
+    if (seen.get(route.taskId) === state) continue;
+    seen.set(route.taskId, state);
     routes.push(route);
   }
   return routes;

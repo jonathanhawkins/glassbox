@@ -6,6 +6,7 @@ import {
   workerInRoute,
   workerInSubject,
   taskIdOf,
+  isDoneSubject,
   routeMailToWorkers,
   tallyMailCounts,
   type MailRoute,
@@ -77,10 +78,12 @@ test("parseMailRoute reads the canonical assign and done subjects", () => {
     taskId: "14",
     worker: "worker-2",
     subject: "assign task 14 -> worker-2: parse fixtures",
+    done: false, // an assignment, not a completion
   });
   const done = parseMailRoute("worker-2 done task 14: parser passing");
   assert.equal(done!.worker, "worker-2");
   assert.equal(done!.taskId, "14");
+  assert.equal(done!.done, true); // "done" / "passing" mark it finished
 });
 
 test("parseMailRoute is case-insensitive", () => {
@@ -88,6 +91,7 @@ test("parseMailRoute is case-insensitive", () => {
     taskId: "5",
     worker: "worker-1",
     subject: "WORKER-1 DONE TASK 5",
+    done: true, // "DONE" marks it finished
   });
 });
 
@@ -99,65 +103,90 @@ test("parseMailRoute returns null unless both a worker and a task id are present
   assert.equal(parseMailRoute("reassign task to worker-3 soon"), null); // "task to ..." has no digits
 });
 
-// --- routeMailToWorkers: oldest-first scan, latest-signal-wins, dedup via the shared seen map -
+// --- isDoneSubject: the completion vocabulary ------------------------------------------------
 
-test("routeMailToWorkers dedups an assign+done pair for the same task into one route", () => {
-  const mail = [
-    { from: "w2", subject: "worker-2 done task 8: built" }, // newest
-    { from: "coord", subject: "assign task 8 -> worker-2: build" }, // older
-  ];
-  const routes = routeMailToWorkers(mail, new Map());
+test("isDoneSubject recognizes completion words and rejects assign/claim/hold words", () => {
+  assert.equal(isDoneSubject("worker-1 done task 2"), true);
+  assert.equal(isDoneSubject("task 72 verified green"), true);
+  assert.equal(isDoneSubject("worker-2 tests passing"), true);
+  assert.equal(isDoneSubject("assign task 4 -> worker-2: extract"), false);
+  assert.equal(isDoneSubject("worker-1 claimed task 1"), false);
+  assert.equal(isDoneSubject("worker-1 hold: task 2"), false);
+  assert.equal(isDoneSubject("refocus task 73 -> worker-2"), false);
+});
+
+// --- routeMailToWorkers: newest-signal-wins per task, CLAIM vs DONE, dedup via the seen map ---
+
+test("a claim then a done across polls moves the bead onto a worker, then to done", () => {
+  const seen = new Map<string, string>();
+  const claim = routeMailToWorkers([{ subject: "assign task 8 -> worker-2: build" }], seen);
+  assert.equal(claim.length, 1);
+  assert.equal(claim[0]!.worker, "worker-2");
+  assert.equal(claim[0]!.done, false);
+
+  const done = routeMailToWorkers([{ subject: "worker-2 done task 8: built" }], seen);
+  assert.equal(done.length, 1);
+  assert.equal(done[0]!.done, true);
+});
+
+test("within one batch the newest signal wins: an assign+done settles on a single completion", () => {
+  const routes = routeMailToWorkers(
+    [
+      { subject: "worker-2 done task 8: built" }, // newest: completion
+      { subject: "assign task 8 -> worker-2: build" }, // older: claim
+    ],
+    new Map(),
+  );
   assert.equal(routes.length, 1);
-  assert.deepEqual(routes[0], {
-    taskId: "8",
-    worker: "worker-2",
-    subject: "assign task 8 -> worker-2: build", // oldest-first, so the assign subject wins the title
-  });
+  assert.equal(routes[0]!.done, true); // settles on done, no intermediate-claim flicker
 });
 
-test("routeMailToWorkers lets the newest signal win a reassigned task's lane", () => {
+test("routeMailToWorkers returns distinct tasks oldest-first, none done", () => {
   const mail = [
-    { from: "w3", subject: "worker-3 done task 5: x" }, // newest
-    { from: "coord", subject: "assign task 5 -> worker-1: y" }, // older
-  ];
-  const routes = routeMailToWorkers(mail, new Map());
-  // Both emit (oldest-first); a caller applying them in order lands the lane on the newest, worker-3.
-  assert.deepEqual(routes.map((r: MailRoute) => r.worker), ["worker-1", "worker-3"]);
-});
-
-test("routeMailToWorkers scans several distinct tasks oldest-first", () => {
-  const mail = [
-    { from: "coord", subject: "assign task 3 -> worker-4: c" }, // newest
-    { from: "coord", subject: "assign task 2 -> worker-1: b" },
-    { from: "coord", subject: "assign task 1 -> worker-2: a" }, // oldest
+    { subject: "assign task 3 -> worker-4: c" }, // newest
+    { subject: "assign task 2 -> worker-1: b" },
+    { subject: "assign task 1 -> worker-2: a" }, // oldest
   ];
   const routes = routeMailToWorkers(mail, new Map());
   assert.deepEqual(
     routes.map((r: MailRoute) => `${r.taskId}:${r.worker}`),
     ["1:worker-2", "2:worker-1", "3:worker-4"],
   );
+  assert.ok(routes.every((r: MailRoute) => r.done === false));
 });
 
 test("routeMailToWorkers carries its seen map across polls to dedup re-emits", () => {
   const mail = [
-    { from: "w2", subject: "worker-2 done task 8: built" },
-    { from: "coord", subject: "assign task 8 -> worker-2: build" },
+    { subject: "worker-2 done task 8: built" },
+    { subject: "assign task 8 -> worker-2: build" },
   ];
-  // The seen map is the caller's cross-poll memory; routeMailToWorkers MUTATES it in place so the
-  // same (task, worker) pair is not re-emitted on the next poll (the SwarmView idempotency).
+  // The seen map is the caller's cross-poll memory, MUTATED in place. The batch settles on the
+  // newest signal (done), so one route emits and the recorded state is "done".
   const seen = new Map<string, string>();
   const first = routeMailToWorkers(mail, seen);
   assert.equal(first.length, 1);
-  assert.equal(seen.get("8"), "worker-2", "the routed task -> worker pair is recorded in seen");
+  assert.equal(seen.get("8"), "done", "the task's current state is recorded in seen");
 
-  // Same mail, same seen map (the next poll): the pair is already known, so nothing re-emits.
+  // Same mail, same seen map (the next poll): nothing changed, so nothing re-emits (idempotent).
   assert.equal(routeMailToWorkers(mail, seen).length, 0);
+});
+
+test("routeMailToWorkers re-emits a claim when a finished task is reopened (reassigned)", () => {
+  const seen = new Map<string, string>();
+  // Poll 1: task 8 finishes on worker-2 -> state "done".
+  routeMailToWorkers([{ subject: "worker-2 done task 8: built" }], seen);
+  assert.equal(seen.get("8"), "done");
+  // Poll 2: the validator reopens it onto worker-3 -> the claim re-emits (done -> worker-3).
+  const reopened = routeMailToWorkers([{ subject: "assign task 8 -> worker-3: redo" }], seen);
+  assert.equal(reopened.length, 1);
+  assert.equal(reopened[0]!.worker, "worker-3");
+  assert.equal(reopened[0]!.done, false);
 });
 
 test("routeMailToWorkers ignores non-routable subjects and returns nothing for an all-noise batch", () => {
   const mail = [
-    { from: "a", subject: "build passed" },
-    { from: "b", subject: "standup at noon" },
+    { subject: "build passed" }, // "passed" but no worker/task id -> not routable
+    { subject: "standup at noon" },
   ];
   assert.deepEqual(routeMailToWorkers(mail, new Map()), []);
 });

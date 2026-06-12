@@ -537,22 +537,20 @@ export function SwarmView() {
     }
   }, [mail]);
 
-  // Route REAL task beads to worker lanes from the mail protocol. The voxherd task list
-  // carries no assignee, but the swarm's coordination mail does: the role prompts require
-  // task subjects like "assign task 14 -> worker-2: ..." / "worker-2 done task 14: ...".
-  // Any message naming both a worker and a task id moves that task's bead onto that worker's
-  // dock, so the operator watches the plan fan out planner -> coordinator -> workers for real
-  // (completion still comes from the task list itself via the swarm adapter). Chronological
-  // scan so the latest signal wins a task's lane; the ref dedups re-emits across polls.
+  // Route REAL task beads across the lanes from the mail protocol. The voxherd task list carries
+  // no assignee, but the swarm's coordination mail does: the role prompts require subjects like
+  // "assign task 14 -> worker-2: ..." (claim) and "worker-2 done task 14: ..." (completion). An
+  // ASSIGN/claim subject moves the task's bead onto that worker's dock; a DONE subject slides it
+  // to the done rail. Workers report completion over mail (they finish in their OWN task lists,
+  // not the planner's the board polls), so this is the board's primary "retire the card" signal.
+  // Chronological scan so the latest signal wins; the ref dedups re-emits across polls.
   useEffect(() => {
     const controller = controllerRef.current;
     if (!controller || !mail.length) return;
-    // routeMailToWorkers scans oldest-first, latest-signal-wins, and mutates the dedup ref so a
-    // (task, worker) pair already emitted on a prior poll is skipped here.
     for (const route of routeMailToWorkers(mail, mailRouteRef.current)) {
       controller.apply({
         ts: Date.now(),
-        type: "bead_claimed",
+        type: route.done ? "bead_done" : "bead_claimed",
         run_id: "mail-route",
         planner_version: 1,
         agent: route.worker,
