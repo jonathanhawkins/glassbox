@@ -9,7 +9,16 @@ import assert from "node:assert/strict";
 import { ARCHETYPES } from "./archetypes.ts";
 import { ARCHETYPE_IDS } from "@glassbox/contract";
 
-const REQUIRED_STRING_FIELDS = ["id", "name", "tagline", "whenToUse", "stop", "accent"] as const;
+const REQUIRED_STRING_FIELDS = [
+  "id",
+  "name",
+  "tagline",
+  "detail",
+  "whenToUse",
+  "example",
+  "stop",
+  "accent",
+] as const;
 
 test("there are exactly 8 archetypes", () => {
   assert.equal(ARCHETYPES.length, 8);

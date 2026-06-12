@@ -1,7 +1,8 @@
 "use client";
 
 // The loop-shapes rail: pick a loop shape to run on this worker. Teaches what each
-// loop is (tagline + when-to-use + stop condition) and fires it via a kickoff prompt.
+// loop is (tagline, with an info icon expanding detail + when-to-use + example + stop
+// condition) and fires it via a kickoff prompt.
 // "Shapes" is literal: the board draws a different return edge per shape, so the rail
 // name and the graph teach the same idea.
 
@@ -70,14 +71,37 @@ export function ArchetypeRail({
         {ARCHETYPES.map((a) => (
           <div key={a.id} className="rounded-lg border border-line bg-panel/40 p-2">
             <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => setOpen(open === a.id ? "" : a.id)}
-                className="min-w-0 text-left"
-              >
-                <span className={`text-sm font-semibold ${a.accent}`}>{a.name}</span>
-                <span className="ml-2 text-[11px] text-ink-dim">{a.tagline}</span>
-              </button>
+              <div className="flex min-w-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setOpen(open === a.id ? "" : a.id)}
+                  className="min-w-0 text-left"
+                >
+                  <span className={`text-sm font-semibold ${a.accent}`}>{a.name}</span>
+                  <span className="ml-2 text-[11px] text-ink-dim">{a.tagline}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpen(open === a.id ? "" : a.id)}
+                  aria-label={`What does the ${a.name} loop do?`}
+                  aria-expanded={open === a.id}
+                  title={`What does the ${a.name} loop do?`}
+                  className={`shrink-0 rounded-full p-0.5 transition-colors ${
+                    open === a.id ? "text-accent" : "text-ink-dim/70 hover:text-ink"
+                  }`}
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <circle cx="8" cy="8" r="6.4" stroke="currentColor" strokeWidth="1.2" />
+                    <circle cx="8" cy="5.2" r="0.95" fill="currentColor" />
+                    <path
+                      d="M8 7.4v3.8"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={() => onRun(a, goal)}
@@ -92,9 +116,17 @@ export function ArchetypeRail({
               </button>
             </div>
             {open === a.id && (
-              <div className="mt-1 space-y-0.5 text-[11px] text-ink-dim">
-                <p>When to use: {a.whenToUse}</p>
-                <p>This loop {a.stop}.</p>
+              <div className="mt-1.5 space-y-1 border-t border-line pt-1.5 text-[11px] leading-relaxed text-ink-dim">
+                <p>{a.detail}</p>
+                <p>
+                  <span className="font-medium text-ink">When to use:</span> {a.whenToUse}
+                </p>
+                <p>
+                  <span className="font-medium text-ink">Example:</span> {a.example}
+                </p>
+                <p>
+                  <span className="font-medium text-ink">Stops:</span> this loop {a.stop}.
+                </p>
               </div>
             )}
           </div>

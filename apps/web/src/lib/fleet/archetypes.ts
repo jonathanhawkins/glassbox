@@ -17,7 +17,9 @@ export interface Archetype {
   id: string;
   name: string;
   tagline: string; // what it does, one line
+  detail: string; // what actually happens round to round, in plain words (the info panel)
   whenToUse: string; // when to reach for it
+  example: string; // a concrete goal + what the loop does with it (the info panel)
   stop: string; // the stop condition, one line ("stops when ...")
   accent: string; // tailwind text color
   kickoff: (goal: string) => string; // the prompt that starts this loop on the conductor
@@ -43,7 +45,11 @@ export const ARCHETYPES: Archetype[] = [
     id: "land",
     name: "Land",
     tagline: "Drive to a done-state, then stop.",
+    detail:
+      "The swarm breaks the goal into tasks, works them in parallel, and verifies each result for real. If verification fails, the next round attacks what is still wrong. It only stops once the goal actually checks out.",
     whenToUse: "You have a clear done-state: a feature, a bug fix, an issue to close.",
+    example:
+      '"Fix the flaky auth test and close issue #42." The swarm keeps fixing and re-verifying until the test really passes, then lands.',
     stop: "stops when the goal is verified done",
     accent: "text-[#6f9e83]", // sage (muted categorical, user-chosen)
     kickoff: (g) =>
@@ -53,7 +59,11 @@ export const ARCHETYPES: Archetype[] = [
     id: "climb",
     name: "Climb",
     tagline: "Push a metric until it stops improving.",
+    detail:
+      "Every round is an attempt to beat the current best number: make a change, measure it, keep it if it improved. When a round cannot beat the best, the climb is over and it reports the curve.",
     whenToUse: "You want it faster, cheaper, or better and there is a number to climb.",
+    example:
+      '"Make tokenizer encode() faster." Each round tries an optimization and benchmarks it, stopping once a round cannot beat the best time.',
     stop: "stops when you can no longer beat your best",
     accent: "text-[#5e94a8]", // teal (muted categorical, user-chosen)
     kickoff: (g) =>
@@ -63,7 +73,11 @@ export const ARCHETYPES: Archetype[] = [
     id: "hold",
     name: "Hold",
     tagline: "Keep an invariant true, repair drift.",
+    detail:
+      "A standing guard. Each round it re-checks the invariant. If anything drifted, it dispatches repairs and verifies the fix landed. It never declares done, it holds the line.",
     whenToUse: "Something must stay green: CI, the build, a healthy state.",
+    example:
+      '"Keep CI green on main." Whenever a check breaks, it repairs the break, confirms green, and goes back to standing guard.',
     stop: "never stops, repairs whatever drifts",
     accent: "text-[#a88a5c]", // sand (muted categorical, user-chosen)
     kickoff: (g) =>
@@ -73,7 +87,11 @@ export const ARCHETYPES: Archetype[] = [
     id: "watch",
     name: "Watch",
     tagline: "Ingest a stream, report a digest each round.",
+    detail:
+      "A standing lookout. Each round it pulls whatever is new from the source, has sub-agents analyze it, and posts a short digest. It never declares done, it keeps watching.",
     whenToUse: "You want a periodic digest: logs, feedback, recent changes.",
+    example:
+      '"Watch the error logs." Every round it reads the new entries and reports a digest of anything notable since the last round.',
     stop: "never stops, reports every round",
     accent: "text-[#9c84a8]", // mauve (muted categorical, user-chosen)
     kickoff: (g) =>
@@ -83,7 +101,11 @@ export const ARCHETYPES: Archetype[] = [
     id: "burst",
     name: "Burst",
     tagline: "Fan out once, synthesize, done.",
+    detail:
+      "One parallel blast. All the independent parts go to sub-agents at the same time, then the conductor merges their results into a single outcome. There is no second round.",
     whenToUse: "The work splits into parallel parts you want done at once.",
+    example:
+      '"Review this PR for security, performance, and test coverage." Three reviewers run at once and the findings come back as one report.',
     stop: "runs one round, then stops",
     accent: "text-[#a77e86]", // rosewood (muted categorical, user-chosen)
     kickoff: (g) =>
@@ -93,7 +115,11 @@ export const ARCHETYPES: Archetype[] = [
     id: "sweep",
     name: "Sweep",
     tagline: "Drain a finite backlog, wave by wave.",
+    detail:
+      "First it enumerates the whole backlog up front, so the full queue is visible before any work starts. Then it drains the queue in parallel waves, verifying each item, until nothing is left.",
     whenToUse: "The work is an enumerable list: a migration, a backfill, a checklist.",
+    example:
+      '"Migrate all 60 call sites off the deprecated API." All 60 appear as tasks first, then waves of workers drain the list to zero.',
     stop: "stops when the backlog is empty",
     accent: "text-[#90985f]", // olive (muted categorical)
     kickoff: (g) =>
@@ -103,7 +129,11 @@ export const ARCHETYPES: Archetype[] = [
     id: "dig",
     name: "Dig",
     tagline: "Discover until the finds run dry.",
+    detail:
+      "Rounds of hunters, each digging in a different direction, with every find checked against what is already recorded so only genuinely new ones count. Productive rounds keep it digging; two empty rounds in a row end it.",
     whenToUse: "Open-ended discovery: bug hunts, audits, research.",
+    example:
+      '"Audit the codebase for race conditions." Hunters keep surfacing new finds until two rounds come up empty, then it reports the full list.',
     stop: "stops after two rounds with nothing new",
     accent: "text-[#7e8aa2]", // slate (muted categorical)
     kickoff: (g) =>
@@ -113,7 +143,11 @@ export const ARCHETYPES: Archetype[] = [
     id: "race",
     name: "Race",
     tagline: "Same goal, competing attempts, one judge.",
+    detail:
+      "Several sub-agents attack the same goal with deliberately different approaches. When the attempts land, a judge runs and compares them for real (measure, not vibes) and declares exactly one winner.",
     whenToUse: "Several approaches could work and you want the best one, proven.",
+    example:
+      '"Speed up the parser, best approach wins." Three strategies run head to head, the judge benchmarks all three, and one winner ships.',
     stop: "stops when the judge picks a winner",
     accent: "text-[#b06f58]", // clay (muted categorical)
     kickoff: (g) =>
