@@ -72,6 +72,26 @@ Per-task planner-version scores -> Redis sorted sets -> the climbing curve
 | Checkable evaluators | exact token-ID diff (tiktoken gpt2); pytest |
 | Swarm inference | W&B Inference (openai/gpt-oss-120b et al.), Weave-traced |
 
+## Loop shapes
+
+Every shape runs the same swarm engine: decompose the goal into tasks, dispatch each
+to a sub-agent, verify the results for real. What differs is the stop condition, so
+each shape is named by its motion, a single-syllable verb. The 8 ids are canonical in
+`contract/glassbox.contract.json` ("archetypes"), shared by the TS cockpit and the
+Python swarm. The board redraws the loop's return edge per shape, and you pick a shape
+in the `/swarm` view or deep-link it with `?shape=`.
+
+| Shape | What it does | Stops |
+| --- | --- | --- |
+| Land | Drive to a done-state, then stop. | When the goal is verified done. |
+| Climb | Push a metric until it stops improving. | When you can no longer beat your best. |
+| Hold | Keep an invariant true, repair drift. | Never, repairs whatever drifts. |
+| Watch | Ingest a stream, report a digest each round. | Never, reports every round. |
+| Burst | Fan out once, synthesize, done. | After one round. |
+| Sweep | Drain a finite backlog, wave by wave. | When the backlog is empty. |
+| Dig | Discover until the finds run dry. | After two rounds with nothing new. |
+| Race | Same goal, competing attempts, one judge. | When the judge picks a winner. |
+
 ## Layout
 
 - `apps/web/` cockpit (tldraw board + CopilotKit), port 3100
