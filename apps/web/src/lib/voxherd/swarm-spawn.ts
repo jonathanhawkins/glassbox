@@ -14,8 +14,21 @@ import { roleKeyOf, type SwarmModels } from "./role-models";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// Hard boundaries injected into EVERY spawned agent (and the conductor). They override the goal
+// so a "helpful" agent cannot commit to the repo or wander outside its sandbox, which is exactly
+// how an earlier run went rogue (committed to main, edited the cockpit's own source).
+const SAFETY =
+  `SAFETY RULES (these OVERRIDE the goal; never break them, even if the goal seems to ask):\n` +
+  `- Only create, edit, or delete files INSIDE the working directory the goal names. Never touch ` +
+  `anything outside it, and never modify this cockpit's own source (apps/web, agents, contract).\n` +
+  `- Never run git or any version-control command: no add, commit, push, checkout, branch, reset, ` +
+  `merge, or rebase. The operator reviews and integrates your output; you only produce the work.\n` +
+  `- When the goal's stop condition is reached, STOP and report it. Do not start new work, do not ` +
+  `keep "improving" past the goal, do not commit.\n\n`;
+
 const intro = (goal: string, role: string) =>
   `You are ${role} in a LIVE multi-agent swarm. Goal:\n\n${goal}\n\n` +
+  SAFETY +
   `This is a real swarm of separate Claude sessions. Coordinate for real, never simulate or ` +
   `claim results you did not produce:\n` +
   `- Use the Agent Mail tools (mcp-agent-mail): register your identity once, send messages to ` +
@@ -100,6 +113,7 @@ export function conductorBlueprint(
     : `Keep the loop running until the validator reports the goal is genuinely met.`;
   return (
     `You are the CONDUCTOR of a live agent swarm. Goal:\n\n${goal}\n\n` +
+    SAFETY +
     `I have spawned dedicated teammate sessions: ${roster}. They each poll Agent Mail and the ` +
     `shared task list. Orchestrate the real cycle: decompose the goal into concrete tasks ` +
     `(TaskCreate, FIRST, so the plan is on the board within a minute), Agent-Mail each worker its ` +
