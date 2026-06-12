@@ -1,7 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { initSweep, stepSweep, SWEEP_EMPTY_STREAK, type SweepState } from "./loop-monitor.ts";
+import {
+  initSweep,
+  stepSweep,
+  SWEEP_EMPTY_STREAK,
+  initClimb,
+  stepClimb,
+  CLIMB_STALL_STREAK,
+  type SweepState,
+  type ClimbState,
+} from "./loop-monitor.ts";
 
 // The Sweep monitor pins how a spawned swarm's backlog-drained stop condition is DETECTED from the
 // live task-poll counts: backlog goes up as the planner fans out, then drains to empty, and once it
@@ -98,5 +107,75 @@ test("stepSweep is pure: it never mutates the input state", () => {
   const before = initSweep();
   const snapshot = { ...before };
   stepSweep(before, { shapeId: "sweep", backlog: 5, done: 0 });
+  assert.deepEqual(before, snapshot);
+});
+
+// --- Climb monitor: stop when the metric plateaus -------------------------------------------
+
+// Drive a sequence of metric readings through the Climb monitor and return the final state.
+function climb(metrics: (number | null)[], higherIsBetter = true, shapeId = "climb"): ClimbState {
+  let s = initClimb();
+  for (const m of metrics) s = stepClimb(s, { shapeId, metric: m }, higherIsBetter);
+  return s;
+}
+
+test("a fresh Climb monitor is running, not climbed", () => {
+  const s = initClimb();
+  assert.equal(s.reason, "");
+  assert.equal(s.climbed, false);
+});
+
+test("the first reading is a baseline, not a climb", () => {
+  const s = climb([0.8]);
+  assert.equal(s.best, 0.8);
+  assert.equal(s.climbed, false);
+  assert.equal(s.reason, "");
+});
+
+test("accuracy climbs then plateaus -> 'plateau' after the stall debounce", () => {
+  assert.equal(CLIMB_STALL_STREAK, 3);
+  // 0.80 baseline -> climbs to 0.92 -> then flat: stall 1,2,3 -> plateau on the 3rd flat read.
+  const climbing = [0.8, 0.85, 0.92];
+  assert.equal(climb(climbing).reason, ""); // still improving
+  assert.equal(climb([...climbing, 0.92, 0.92]).reason, ""); // stall 1,2 - not yet
+  assert.equal(climb([...climbing, 0.92, 0.92, 0.92]).reason, "plateau"); // stall 3 -> plateau
+});
+
+test("a metric that never improves past its baseline never plateaus (no false stop)", () => {
+  // Already maxed (e.g. the tokenizer at accuracy 1.0): flat from the start -> never climbed.
+  const s = climb([1.0, 1.0, 1.0, 1.0, 1.0]);
+  assert.equal(s.climbed, false);
+  assert.equal(s.reason, "");
+});
+
+test("lower-is-better (wall_ms): latency dropping is a climb; flat latency plateaus", () => {
+  const dropping = [229, 180, 140]; // ms going down = improving
+  assert.equal(climb(dropping, false).climbed, true);
+  assert.equal(climb(dropping, false).reason, "");
+  // Then it stops dropping (stuck at 140) for the debounce -> plateau.
+  assert.equal(climb([...dropping, 140, 140, 140], false).reason, "plateau");
+  // A regression (latency goes UP) is not an improvement, it counts toward the stall.
+  assert.equal(climb([229, 180, 200, 200, 200], false).reason, "plateau");
+});
+
+test("an improvement resets the stall streak (a late gain keeps it climbing)", () => {
+  const s = climb([0.8, 0.9, 0.9, 0.9, 0.95]); // flat twice, then a fresh gain
+  assert.equal(s.reason, "");
+  assert.equal(s.stallStreak, 0);
+  assert.equal(s.best, 0.95);
+});
+
+test("stepClimb ignores non-climb shapes and null/NaN metrics", () => {
+  assert.equal(climb([0.8, 0.9, 0.9, 0.9, 0.9], true, "sweep").reason, ""); // wrong shape
+  // null/NaN readings are skipped, not treated as a stall.
+  const s = climb([0.8, 0.9, null, null, null, null]);
+  assert.equal(s.reason, "");
+  assert.equal(s.best, 0.9);
+});
+
+test("stepClimb is pure: it never mutates the input state", () => {
+  const before = initClimb();
+  const snapshot = { ...before };
+  stepClimb(before, { shapeId: "climb", metric: 0.9 });
   assert.deepEqual(before, snapshot);
 });

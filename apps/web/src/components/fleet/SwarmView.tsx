@@ -36,7 +36,14 @@ import {
 } from "@/lib/voxherd/role-models";
 import { routeMailToWorkers, tallyMailCounts } from "@/lib/voxherd/mail-route";
 import { usePersistentState } from "@/lib/usePersistentState";
-import { initSweep, stepSweep, type SweepState } from "@/lib/fleet/loop-monitor";
+import {
+  initSweep,
+  stepSweep,
+  initClimb,
+  stepClimb,
+  type SweepState,
+  type ClimbState,
+} from "@/lib/fleet/loop-monitor";
 import {
   LoopShapeContext,
   type LoopShapeStatus,
@@ -142,6 +149,13 @@ export function SwarmView() {
   // running, "done" once the condition is reached.
   const [realStop, setRealStop] = useState<{ reason: string; round: number }>({ reason: "", round: 0 });
   const sweepRef = useRef<SweepState>(initSweep());
+  const climbRef = useRef<ClimbState>(initClimb());
+  // The live metric a Climb run pushes, read from the leaderboard (prefer wall_ms = perf, lower
+  // better; else accuracy, higher better). Only polled while a Climb is armed on a real swarm.
+  const [climbMetric, setClimbMetric] = useState<{ value: number | null; higherIsBetter: boolean }>({
+    value: null,
+    higherIsBetter: true,
+  });
   const prevSubCountRef = useRef(0);
   const searchParams = useSearchParams();
   // The floating header wraps on smaller screens (flex-wrap), so its height is not
@@ -808,6 +822,8 @@ export function SwarmView() {
       setLoopShapeId(shape.id);
       // Re-arm the real-swarm shape monitor for this run (see the monitor effect below).
       sweepRef.current = initSweep();
+      climbRef.current = initClimb();
+      setClimbMetric({ value: null, higherIsBetter: true });
       setRealStop({ reason: "", round: 0 });
       setSpawning(true);
       setNote(`spawning real swarm (${shape.name} loop)…`);
@@ -931,14 +947,58 @@ export function SwarmView() {
   useEffect(() => {
     const hasSwarm = Object.keys(nodeSessions).length > 0;
     if (!hasSwarm || !loopShapeId || loop) return; // the kernel ("Run") drives its own status
-    const next = stepSweep(sweepRef.current, {
-      shapeId: loopShapeId,
-      backlog: counts.queued + counts.working,
-      done: counts.done,
-    });
-    sweepRef.current = next;
-    if (next.reason !== realStop.reason) setRealStop({ reason: next.reason, round: 0 });
-  }, [counts, loopShapeId, loop, nodeSessions, realStop.reason]);
+    let nextReason = realStop.reason;
+    if (loopShapeId === "sweep") {
+      const next = stepSweep(sweepRef.current, {
+        shapeId: loopShapeId,
+        backlog: counts.queued + counts.working,
+        done: counts.done,
+      });
+      sweepRef.current = next;
+      nextReason = next.reason;
+    } else if (loopShapeId === "climb") {
+      const next = stepClimb(
+        climbRef.current,
+        { shapeId: loopShapeId, metric: climbMetric.value },
+        climbMetric.higherIsBetter,
+      );
+      climbRef.current = next;
+      nextReason = next.reason;
+    }
+    if (nextReason !== realStop.reason) setRealStop({ reason: nextReason, round: 0 });
+  }, [counts, climbMetric, loopShapeId, loop, nodeSessions, realStop.reason]);
+
+  // Climb's metric source: poll the leaderboard ONLY while a Climb is armed on a real swarm. The
+  // validator updates it (glassbox:planner_scores via harness/eval.py) as it improves. Prefer
+  // wall_ms (perf, lower is better) when present, else the accuracy score (higher is better); a
+  // flat/maxed metric never "climbs", so the monitor won't false-plateau.
+  useEffect(() => {
+    const hasSwarm = Object.keys(nodeSessions).length > 0;
+    if (!hasSwarm || loopShapeId !== "climb" || loop) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const res = await fetch("/api/leaderboard?task=tokenizer", { cache: "no-store" });
+        const rows = (await res.json()) as { accuracy?: number; wall_ms?: number }[];
+        if (!alive || !Array.isArray(rows) || rows.length === 0) return;
+        const wall = rows.map((r) => r.wall_ms).filter((x): x is number => typeof x === "number");
+        if (wall.length) {
+          setClimbMetric({ value: Math.min(...wall), higherIsBetter: false });
+        } else {
+          const acc = rows.map((r) => r.accuracy).filter((x): x is number => typeof x === "number");
+          if (acc.length) setClimbMetric({ value: Math.max(...acc), higherIsBetter: true });
+        }
+      } catch {
+        /* keep last reading */
+      }
+    };
+    void tick();
+    const id = setInterval(tick, 3000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [nodeSessions, loopShapeId, loop]);
 
   // the swarm down automatically, but only on a real "done", not a manual stop or max-rounds.
   // The "done" can come from the loop kernel (rail Run) OR the real-swarm shape monitor above.
