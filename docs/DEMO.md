@@ -61,6 +61,22 @@ which sub-agent actually moved correctness."
 graded against truth, that improves itself and generalizes. Built this weekend, and it
 connects to a larger Godot-to-Rust port."
 
+## The real swarm on /swarm (the live-landing demo)
+
+The strongest live beat as of 2026-06-12: `/swarm` spawns REAL Claude Code sessions in tmux
+and the cockpit detects the loop shape's stop condition itself. Two proven landings:
+
+- **Sweep** (8 minutes wall): the 4-file sandbox goal drains `4/4` and the board shows
+  `backlog drained ✓` then auto teardown ("cleaned up 6 session(s), logs saved").
+- **Climb** (12 to 20 minutes wall): the tokenizer perf goal. The edge gauge climbs
+  `269 → 141 ms`, the LEADERBOARD rail tracks every version with its Weave Evaluation link,
+  then the plateau lands the swarm by itself.
+
+Pre-flight, goals verbatim, shot list, and honesty notes live in `docs/VIDEO_SCRIPT.md`
+under "The real-swarm cut". Short version: services up, hit `clear` in the /swarm header,
+reset the tokenizer leaderboard + post the baseline eval, workers 2, pick the shape, paste
+the goal, `+ real swarm`, and let it land. `clean up` and `clear` are safe at any moment.
+
 ## Backup buttons (if the chat is flaky)
 
 The board has direct controls per task: "Launch run" (single full plan), "Run climb"
