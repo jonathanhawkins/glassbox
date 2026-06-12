@@ -20,21 +20,38 @@
 // fail the oracle's exact-match. With the full gpt2 pattern, output is
 // byte-for-byte exact (100%).
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::OnceLock;
 
 use base64::Engine as _;
 use fancy_regex::Regex;
+use rustc_hash::FxHashMap;
 
 mod pretok;
 pub use pretok::gpt2_pattern;
 
+/// Ranks pre-decoded at compile time by build.rs (empty when the data file was
+/// not present at build time; the runtime then falls back to parsing the file).
+mod embedded {
+    pub static BLOB: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ranks_blob.bin"));
+    pub static OFFSETS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ranks_offsets.bin"));
+    pub static RANKS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ranks_ranks.bin"));
+
+    pub fn n_tokens() -> usize {
+        RANKS.len() / 4
+    }
+}
+
 /// A gpt2 byte pair encoder backed by the tiktoken rank map and regex.
 pub struct Tokenizer {
-    /// token bytes -> rank
-    ranks: HashMap<Vec<u8>, u32>,
-    /// rank -> token bytes (for decode); also carries special ids
-    decoder: HashMap<u32, Vec<u8>>,
+    /// token bytes -> rank. Keys borrow the compile-time blob on the embedded
+    /// path (zero per-token allocations) and own their bytes on the file path.
+    ranks: FxHashMap<Cow<'static, [u8]>, u32>,
+    /// rank -> token bytes (for decode); built lazily on first decode so the
+    /// encode-only path (the oracle) never pays for it; also carries special ids
+    decoder: OnceLock<FxHashMap<u32, Cow<'static, [u8]>>>,
     /// gpt2 pretokenization regex
     pattern: Regex,
     /// special token string -> id (e.g. "<|endoftext|>" -> 50256)
@@ -61,8 +78,9 @@ impl Tokenizer {
         pattern: &str,
         special: &[(&str, u32)],
     ) -> Result<Self, String> {
-        let mut ranks: HashMap<Vec<u8>, u32> = HashMap::new();
-        let mut decoder: HashMap<u32, Vec<u8>> = HashMap::new();
+        // gpt2 has ~50k ranks; preallocate so the build never rehashes.
+        let mut ranks: FxHashMap<Cow<'static, [u8]>, u32> =
+            FxHashMap::with_capacity_and_hasher(51_000, Default::default());
         let b64 = base64::engine::general_purpose::STANDARD;
         for (lineno, line) in tiktoken_text.lines().enumerate() {
             let line = line.trim_end_matches(['\r', '\n']);
@@ -83,22 +101,48 @@ impl Tokenizer {
             let rank: u32 = rank_str
                 .parse()
                 .map_err(|e| format!("line {}: bad rank: {}", lineno + 1, e))?;
-            ranks.insert(bytes.clone(), rank);
-            decoder.insert(rank, bytes);
+            ranks.insert(Cow::Owned(bytes), rank);
         }
-        // Special tokens: register the string -> id map and make decode round-trip
-        // them by adding their bytes to the decoder. They are NOT inserted into
-        // `ranks`, so ordinary BPE never produces them.
+        Self::finish(ranks, pattern, special)
+    }
+
+    /// Build a tokenizer from the ranks pre-decoded at compile time. Every key
+    /// borrows the static blob: no file IO, no base64, no per-token allocation.
+    pub fn new_embedded(pattern: &str, special: &[(&str, u32)]) -> Result<Self, String> {
+        let n = embedded::n_tokens();
+        if n == 0 {
+            return Err("no embedded ranks (data file absent at build time)".to_string());
+        }
+        let mut ranks: FxHashMap<Cow<'static, [u8]>, u32> =
+            FxHashMap::with_capacity_and_hasher(n, Default::default());
+        let off = |i: usize| -> usize {
+            u32::from_le_bytes(embedded::OFFSETS[i * 4..i * 4 + 4].try_into().unwrap()) as usize
+        };
+        for i in 0..n {
+            let rank = u32::from_le_bytes(embedded::RANKS[i * 4..i * 4 + 4].try_into().unwrap());
+            ranks.insert(Cow::Borrowed(&embedded::BLOB[off(i)..off(i + 1)]), rank);
+        }
+        Self::finish(ranks, pattern, special)
+    }
+
+    /// Shared tail of the constructors: special table + pattern compile.
+    ///
+    /// Special tokens: register the string -> id map. Their bytes are added to
+    /// the (lazily built) decoder so decode round-trips them. They are NOT
+    /// inserted into `ranks`, so ordinary BPE never produces them.
+    fn finish(
+        ranks: FxHashMap<Cow<'static, [u8]>, u32>,
+        pattern: &str,
+        special: &[(&str, u32)],
+    ) -> Result<Self, String> {
         let mut special_map: HashMap<String, u32> = HashMap::new();
         for (s, id) in special {
             special_map.insert((*s).to_string(), *id);
-            decoder.entry(*id).or_insert_with(|| s.as_bytes().to_vec());
         }
-
         let pattern = Regex::new(pattern).map_err(|e| format!("bad pattern: {}", e))?;
         Ok(Tokenizer {
             ranks,
-            decoder,
+            decoder: OnceLock::new(),
             pattern,
             special: special_map,
         })
@@ -282,12 +326,31 @@ impl Tokenizer {
         out
     }
 
+    /// The rank -> bytes map, inverted from `ranks` on first use. Encode never
+    /// calls this, so the oracle's encode-only run skips the whole build.
+    fn decoder(&self) -> &FxHashMap<u32, Cow<'static, [u8]>> {
+        self.decoder.get_or_init(|| {
+            let mut d: FxHashMap<u32, Cow<'static, [u8]>> = FxHashMap::with_capacity_and_hasher(
+                self.ranks.len() + self.special.len(),
+                Default::default(),
+            );
+            for (bytes, &rank) in &self.ranks {
+                d.insert(rank, bytes.clone());
+            }
+            for (s, &id) in &self.special {
+                d.entry(id).or_insert_with(|| Cow::Owned(s.as_bytes().to_vec()));
+            }
+            d
+        })
+    }
+
     /// Decode token ids back to a String. Concatenates the bytes for each id and
     /// UTF-8 decodes (lossy, matching tiktoken decode behavior on valid input).
     pub fn decode(&self, ids: &[u32]) -> String {
+        let decoder = self.decoder();
         let mut bytes: Vec<u8> = Vec::new();
         for &id in ids {
-            if let Some(b) = self.decoder.get(&id) {
+            if let Some(b) = decoder.get(&id) {
                 bytes.extend_from_slice(b);
             }
         }
@@ -303,6 +366,19 @@ impl Tokenizer {
 /// The pretokenization pattern comes from `pretok::gpt2_pattern` (source code),
 /// NOT a data file, so editing src/pretok.rs is what changes tokenization.
 pub fn load_default() -> Result<Tokenizer, String> {
+    // gpt2 has exactly one special token, <|endoftext|> = 50256. It is opt-in:
+    // ordinary `encode` (what the oracle calls) still treats it as plain text.
+    let special: &[(&str, u32)] = &[("<|endoftext|>", 50256)];
+
+    // Fast path: ranks pre-decoded at compile time, unless the env override asks
+    // for a specific file (then parse that file exactly as before).
+    let overridden = std::env::var("GLASSBOX_RANKS").map_or(false, |v| !v.is_empty());
+    if !overridden {
+        if let Ok(t) = Tokenizer::new_embedded(&gpt2_pattern(), special) {
+            return Ok(t);
+        }
+    }
+
     let ranks_path = resolve_path(
         "GLASSBOX_RANKS",
         &["../harness/data/gpt2.tiktoken", "harness/data/gpt2.tiktoken"],
@@ -311,9 +387,7 @@ pub fn load_default() -> Result<Tokenizer, String> {
     let ranks_text = std::fs::read_to_string(&ranks_path)
         .map_err(|e| format!("reading ranks {}: {}", ranks_path, e))?;
 
-    // gpt2 has exactly one special token, <|endoftext|> = 50256. It is opt-in:
-    // ordinary `encode` (what the oracle calls) still treats it as plain text.
-    Tokenizer::new_with_special(&ranks_text, &gpt2_pattern(), &[("<|endoftext|>", 50256)])
+    Tokenizer::new_with_special(&ranks_text, &gpt2_pattern(), special)
 }
 
 /// Pick a path from an env var or the first existing fallback. Returns the env
@@ -401,6 +475,20 @@ mod tests {
         let allowed: HashSet<&str> = ["<|endoftext|>"].into_iter().collect();
         let ids = t.encode_with_special("a<|endoftext|>b", &allowed);
         assert_eq!(t.decode(&ids), "a<|endoftext|>b");
+    }
+
+    #[test]
+    fn embedded_matches_file_parse() {
+        // The compile-time blob and the runtime file parse must define the exact
+        // same encoder.
+        let emb = Tokenizer::new_embedded(&gpt2_pattern(), &[("<|endoftext|>", 50256)])
+            .expect("embedded ranks present in this repo");
+        let text = std::fs::read_to_string("../harness/data/gpt2.tiktoken").expect("ranks file");
+        let file = Tokenizer::new_with_special(&text, &gpt2_pattern(), &[("<|endoftext|>", 50256)])
+            .expect("parse ranks file");
+        assert_eq!(emb.n_ranks(), file.n_ranks());
+        let sample = "Hello, world! cafe\u{301} 12345 \u{65e5}\u{672c}\u{8a9e}  code(); \t\n end ";
+        assert_eq!(emb.encode(sample), file.encode(sample));
     }
 
     #[test]
