@@ -85,24 +85,43 @@ export function parseMailRoute(subject: string): MailRoute | null {
  * `seen` is the caller's task -> state map, MUTATED in place and carried across polls. Routes are
  * returned oldest-task-first so a caller applying them in order moves chronologically.
  */
-export function routeMailToWorkers(
-  mail: readonly RoutableMail[],
-  seen: Map<string, string>,
-): MailRoute[] {
-  // Newest-first scan: the first routable subject seen for a task is its newest = current signal.
+// Newest-first scan: the first routable subject seen for a task is its newest = current signal.
+function latestRoutePerTask(mail: readonly RoutableMail[]): Map<string, MailRoute> {
   const latest = new Map<string, MailRoute>();
   for (const m of mail) {
     const route = parseMailRoute(m.subject);
     if (route && !latest.has(route.taskId)) latest.set(route.taskId, route);
   }
+  return latest;
+}
+
+export function routeMailToWorkers(
+  mail: readonly RoutableMail[],
+  seen: Map<string, string>,
+): MailRoute[] {
   const routes: MailRoute[] = [];
-  for (const route of [...latest.values()].reverse()) {
+  for (const route of [...latestRoutePerTask(mail).values()].reverse()) {
     const state = route.done ? "done" : route.worker;
     if (seen.get(route.taskId) === state) continue;
     seen.set(route.taskId, state);
     routes.push(route);
   }
   return routes;
+}
+
+/**
+ * The CURRENT state of each task from the coordination mail: "done" when the task's newest signal
+ * is a completion ("worker-2 done task 14"), else the worker lane it is assigned to. This is how
+ * the board knows progress without a shared task list: each spawned agent completes in its OWN
+ * task list (so the polled list never drains), but the swarm announces completion over mail. The
+ * counts derive backlog/done from this, so the Sweep monitor sees the backlog actually drain.
+ */
+export function taskStatesFromMail(mail: readonly RoutableMail[]): Map<string, string> {
+  const states = new Map<string, string>();
+  for (const [taskId, route] of latestRoutePerTask(mail)) {
+    states.set(taskId, route.done ? "done" : route.worker);
+  }
+  return states;
 }
 
 /**

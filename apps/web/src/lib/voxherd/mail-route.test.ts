@@ -8,6 +8,7 @@ import {
   taskIdOf,
   isDoneSubject,
   routeMailToWorkers,
+  taskStatesFromMail,
   tallyMailCounts,
   type MailRoute,
 } from "./mail-route.ts";
@@ -189,6 +190,34 @@ test("routeMailToWorkers ignores non-routable subjects and returns nothing for a
     { subject: "standup at noon" },
   ];
   assert.deepEqual(routeMailToWorkers(mail, new Map()), []);
+});
+
+// --- taskStatesFromMail: current per-task state (done vs assigned worker) -------------------
+
+test("taskStatesFromMail reports each task's newest state (done vs worker)", () => {
+  const mail = [
+    { subject: "worker-2 done task 8: built" }, // newest for task 8 -> done
+    { subject: "assign task 8 -> worker-2: build" },
+    { subject: "assign task 5 -> worker-1: parse" }, // task 5 still assigned
+  ];
+  const states = taskStatesFromMail(mail);
+  assert.equal(states.get("8"), "done");
+  assert.equal(states.get("5"), "worker-1");
+  assert.equal(states.get("99"), undefined); // unseen task
+});
+
+test("taskStatesFromMail lets a later completion override an earlier assignment (newest wins)", () => {
+  // Same task, done is the newest entry -> state is "done" (this is how the backlog drains).
+  const states = taskStatesFromMail([
+    { subject: "worker-3 done task 4: shipped" },
+    { subject: "assign task 4 -> worker-3: do it" },
+  ]);
+  assert.equal(states.get("4"), "done");
+});
+
+test("taskStatesFromMail ignores non-routable subjects", () => {
+  const states = taskStatesFromMail([{ subject: "standup at noon" }, { subject: "build passed" }]);
+  assert.equal(states.size, 0);
 });
 
 // --- tallyMailCounts: a sender's lane is learned from any worker-naming subject -------------

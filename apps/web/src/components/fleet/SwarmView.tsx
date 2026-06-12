@@ -34,7 +34,7 @@ import {
   reviveSwarmModels,
   type SwarmModels,
 } from "@/lib/voxherd/role-models";
-import { routeMailToWorkers, tallyMailCounts } from "@/lib/voxherd/mail-route";
+import { routeMailToWorkers, tallyMailCounts, taskStatesFromMail } from "@/lib/voxherd/mail-route";
 import { usePersistentState } from "@/lib/usePersistentState";
 import {
   initSweep,
@@ -275,15 +275,25 @@ export function SwarmView() {
     [nodeSessions, conductor?.session_id, conductor?.project],
   );
 
+  // Counts the board/gauge/Sweep-monitor read. MAIL-aware: a spawned swarm completes in each
+  // agent's own task list (the polled planner list never drains), but it ANNOUNCES completion over
+  // mail, so a plan task counts as done when its newest mail signal is a completion (else the list
+  // status). Without this the backlog never drains and Sweep can't stop; with it the same plan
+  // bead retires as the "worker-N done task X" mail lands.
   const counts = useMemo(() => {
-    const vals = Object.values(tasks);
-    const st = (t: { status?: string }) => (t.status ?? "").toLowerCase();
-    return {
-      working: vals.filter((t) => st(t) === "in_progress").length,
-      queued: vals.filter((t) => st(t) === "pending").length,
-      done: vals.filter((t) => st(t) === "completed" || st(t) === "done").length,
-    };
-  }, [tasks]);
+    const states = taskStatesFromMail(mail);
+    let working = 0;
+    let queued = 0;
+    let done = 0;
+    for (const [id, t] of Object.entries(tasks)) {
+      const st = (t.status ?? "").toLowerCase();
+      const mailState = states.get(id);
+      if (mailState === "done" || st === "completed" || st === "done") done += 1;
+      else if (st === "in_progress" || (mailState && mailState !== "done")) working += 1;
+      else queued += 1;
+    }
+    return { working, queued, done };
+  }, [tasks, mail]);
 
   // The ordered ring of nodes: planner -> coordinator -> the active workers ->
   // validator -> improver, wrapping around. Drives the inspector's < node > cycler.
