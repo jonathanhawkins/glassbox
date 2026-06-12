@@ -64,7 +64,9 @@ export function ModelsMenu({
         models
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-2 w-[310px] rounded-xl border border-line bg-raised/95 p-3 shadow-xl backdrop-blur">
+        // left-0: open rightwards from the button, over the canvas, instead of extending left
+        // into the conductor console's column.
+        <div className="absolute left-0 top-full z-30 mt-2 w-[310px] rounded-xl border border-line bg-raised/95 p-3 shadow-xl backdrop-blur">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-ink-dim">
               models + effort

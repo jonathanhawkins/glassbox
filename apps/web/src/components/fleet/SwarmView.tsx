@@ -1004,7 +1004,10 @@ export function SwarmView() {
       </div>
 
       {/* Floating header */}
-      <div ref={headerRef} className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start p-3">
+      {/* z-40: the header's dropdowns (conductor picker, models popover) must paint ABOVE the
+          floating consoles (conductor panel + worker inspector, both z-20 and later in the DOM),
+          which would otherwise win the same-z stacking and cover them. */}
+      <div ref={headerRef} className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start p-3">
         <div className="pointer-events-auto flex max-w-[calc(100vw-1.5rem)] flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-raised/80 px-3 py-2 backdrop-blur">
           <Link href="/fleet" className="font-mono text-sm text-ink-dim transition hover:text-ink">
             &larr; fleet
