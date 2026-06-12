@@ -38,7 +38,7 @@ import {
   LoopShapeContext,
   type LoopShapeStatus,
 } from "@/components/fleet/loop-shape-context";
-import type { Archetype } from "@/lib/fleet/archetypes";
+import { ARCHETYPES, type Archetype } from "@/lib/fleet/archetypes";
 import { LOOP_SHAPES } from "@/lib/fleet/loop-shapes";
 import type { SkillPackage } from "@/lib/skillvault/client";
 import { swarmCache, useSwarmRun, useSwarms } from "@/lib/fleet/swarm-cache";
@@ -93,6 +93,9 @@ export function SwarmView() {
   const [workerLines, setWorkerLines] = useState<string[]>([]);
   const [workerInput, setWorkerInput] = useState("");
   const [realGoal, setRealGoal] = usePersistentState("glassbox-swarm-goal-v1", "");
+  // The loop shape "+ real swarm" runs (the header select, persisted). Land is the default:
+  // iterate until the validator verifies the goal genuinely met, then stop.
+  const [realShapeId, setRealShapeId] = usePersistentState("glassbox-swarm-real-shape-v1", "land");
   const [spawning, setSpawning] = useState(false);
   // Per-role model + effort for the next "+ real swarm" spawn, persisted; the revive merges
   // a saved config over the defaults so new roles/fields never come back blank.
@@ -764,8 +767,13 @@ export function SwarmView() {
   const launchRealSwarm = useCallback(
     async (goal: string) => {
       if (!conductor || spawning || !goal.trim()) return;
+      // The swarm runs the selected loop shape (Land unless changed in the header select).
+      // Arm it on the board NOW so the return edge + lane relabels draw as the nodes spawn,
+      // and the run's identity is visible from the first second.
+      const shape = ARCHETYPES.find((a) => a.id === realShapeId) ?? ARCHETYPES[0];
+      setLoopShapeId(shape.id);
       setSpawning(true);
-      setNote("spawning real swarm…");
+      setNote(`spawning real swarm (${shape.name} loop)…`);
       try {
         const project = conductor.project;
         // Record which brain each role got, so the activity log carries the provenance.
@@ -795,10 +803,14 @@ export function SwarmView() {
         swarmCache.setSwarm(conductor.session_id, conductor.project, map);
         const keys = Object.keys(map);
         if (keys.length) {
-          swarmCache.log(conductor.project, { kind: "note", text: `spawned real swarm: ${keys.join(", ")}` });
+          swarmCache.log(conductor.project, {
+            kind: "loop",
+            text: `${shape.name} swarm spawned: ${keys.join(", ")}`,
+          });
           // Kick the conductor to actually orchestrate the spawned teammates (no mocking):
-          // decompose -> assign over Agent Mail -> validate with real tests -> improve -> repeat.
-          void sendToConductor(conductorBlueprint(goal.trim(), map));
+          // decompose -> assign over Agent Mail -> validate with real tests -> improve ->
+          // repeat against the chosen shape's stop condition.
+          void sendToConductor(conductorBlueprint(goal.trim(), map, shape));
         }
         setNote(
           keys.length ? `spawned + orchestrating: ${keys.join(", ")}` : "spawn failed (check the bridge)",
@@ -809,7 +821,7 @@ export function SwarmView() {
         setSpawning(false);
       }
     },
-    [conductor, workers, spawning, swarmModels, sendToConductor],
+    [conductor, workers, spawning, swarmModels, realShapeId, setLoopShapeId, sendToConductor],
   );
 
   const sendToWorker = useCallback(
@@ -1061,12 +1073,26 @@ export function SwarmView() {
                   realGoal.trim() ? "border-accent/50 bg-accent/5" : "border-line"
                 }`}
               />
+              <select
+                value={realShapeId}
+                onChange={(e) => setRealShapeId(e.target.value)}
+                className={SELECT_CLS}
+                title={`the loop shape the spawned swarm runs (${
+                  ARCHETYPES.find((a) => a.id === realShapeId)?.stop ?? "until verified done"
+                })`}
+              >
+                {ARCHETYPES.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={() => void launchRealSwarm(realGoal)}
                 disabled={spawning || !realGoal.trim()}
                 className="rounded-md border border-accent/40 bg-accent/15 px-2.5 py-1 text-[11px] font-semibold text-accent transition hover:bg-accent/25 disabled:opacity-40"
-                title="spawn dedicated validator, improver, and worker sessions you can stream per node"
+                title="spawn dedicated planner, coordinator, worker, validator, and improver sessions running the selected loop shape"
               >
                 {spawning ? "spawning…" : "+ real swarm"}
               </button>

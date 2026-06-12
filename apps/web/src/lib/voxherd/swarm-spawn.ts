@@ -76,16 +76,27 @@ function improverPrompt(goal: string): string {
   );
 }
 
-// The conductor (the session the user picked) orchestrates the spawned swarm.
-export function conductorBlueprint(goal: string, nodes: Record<string, string>): string {
+// The conductor (the session the user picked) orchestrates the spawned swarm. The loop SHAPE
+// names the cycle's stop condition (the header's shape select, default Land): the same eight
+// shapes the rail teaches, applied to the spawned-session swarm instead of in-conductor
+// sub-agents. Without one the cycle falls back to Land's "until genuinely met".
+export function conductorBlueprint(
+  goal: string,
+  nodes: Record<string, string>,
+  shape?: { name: string; tagline: string; stop: string },
+): string {
   const roster = Object.keys(nodes).join(", ") || "the swarm";
+  const loop = shape
+    ? `Run the cycle as a ${shape.name.toUpperCase()} loop: ${shape.tagline} This loop ${shape.stop}, ` +
+      `so drive the swarm round by round against that stop condition and report when it is reached.`
+    : `Keep the loop running until the validator reports the goal is genuinely met.`;
   return (
     `You are the CONDUCTOR of a live agent swarm. Goal:\n\n${goal}\n\n` +
     `I have spawned dedicated teammate sessions: ${roster}. They each poll Agent Mail and the ` +
     `shared task list. Orchestrate the real cycle: decompose the goal into concrete tasks ` +
     `(TaskCreate), Agent-Mail each worker its assignment, let the validator verify with real tests ` +
     `(and Chrome/computer-use if available), and let the improver turn failures into new tasks + ` +
-    `tickets. Keep the loop running until the validator reports the goal is genuinely met. Do not ` +
+    `tickets. ${loop} Do not ` +
     `simulate any of it — coordinate over Agent Mail and the task list for real.`
   );
 }
