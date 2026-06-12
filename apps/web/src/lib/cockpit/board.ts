@@ -426,6 +426,33 @@ export class BoardController {
     this.resizeObserver.observe(container);
   }
 
+  /**
+   * Remove every task BEAD (backlog grid, worker docks, done rail) and reset the bead
+   * bookkeeping, leaving the agent nodes and docks in place. The header's "clear" button
+   * uses this after a run lands so the next run starts on a clean board: docks drop back
+   * to idle and stale lane glows (a torn-down swarm has no live status poll to correct
+   * them) are eased to idle too.
+   */
+  clearBeads() {
+    const beads = Array.from(this.beadByBeadId.values());
+    const docks = new Set<string>();
+    for (const r of beads) if (r.worker) docks.add(r.worker);
+    const ids = beads.map((r) => r.shapeId);
+    if (ids.length) {
+      this.editor.run(() => this.editor.deleteShapes(ids), { ignoreShapeLock: true });
+    }
+    this.beadByBeadId.clear();
+    for (const t of this.beadLandTimers.values()) clearTimeout(t);
+    this.beadLandTimers.clear();
+    for (const t of this.workerResetTimers.values()) clearTimeout(t);
+    this.workerResetTimers.clear();
+    this.nextBacklogSlot = 0;
+    this.nextDoneSlot = 0;
+    this.routeIdx = 0;
+    for (const w of docks) this.setDockActive(w, false);
+    this.setAllAgents("idle");
+  }
+
   /** Remove every shape (agents + beads) and reset bookkeeping. */
   private clearAll() {
     const ids = Array.from(this.editor.getCurrentPageShapeIds());

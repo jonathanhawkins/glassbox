@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BoardController } from "@/lib/cockpit/board";
 import { AgentShapeUtil, BeadShapeUtil, DockShapeUtil } from "@/lib/cockpit/shapes";
 import { SwarmRoutingEdges } from "@/components/fleet/SwarmRoutingEdges";
-import { startSwarmAdapter } from "@/lib/voxherd/swarm-adapter";
+import { startSwarmAdapter, type ClearFloor } from "@/lib/voxherd/swarm-adapter";
 import type { GlassboxEvent } from "@glassbox/contract";
 
 const SHAPE_UTILS = [AgentShapeUtil, DockShapeUtil, BeadShapeUtil];
@@ -29,6 +29,7 @@ const TL_COMPONENTS: TLComponents = {
 export function SwarmBoard({
   sessionId,
   taskKeys,
+  clearFloor = null,
   onReady,
   onEvent,
   workers = 4,
@@ -37,21 +38,26 @@ export function SwarmBoard({
   // Candidate task-list keys in priority order (planner session, conductor session, project).
   // The board reads whichever holds the canonical plan; see swarm-adapter.fetchSwarmTasks.
   taskKeys: string[];
+  // The conductor's persisted clear snapshot: tasks it names never re-seed beads (the
+  // header "clear" button would otherwise be undone by the adapter's next poll / a reload).
+  clearFloor?: ClearFloor | null;
   onReady?: (editor: Editor, controller: BoardController) => void;
   onEvent?: (ev: GlassboxEvent) => void;
   workers?: number;
 }) {
   const controllerRef = useRef<BoardController | null>(null);
-  // Latest-ref pattern: keep the newest onEvent/workers/taskKeys reachable from the
-  // adapter callback below WITHOUT re-subscribing on every render. Assigned in
+  // Latest-ref pattern: keep the newest onEvent/workers/taskKeys/clearFloor reachable from
+  // the adapter callback below WITHOUT re-subscribing on every render. Assigned in
   // an effect (not the render body) so render stays pure.
   const onEventRef = useRef(onEvent);
   const workersRef = useRef(workers);
   const taskKeysRef = useRef(taskKeys);
+  const clearFloorRef = useRef(clearFloor);
   useEffect(() => {
     onEventRef.current = onEvent;
     workersRef.current = workers;
     taskKeysRef.current = taskKeys;
+    clearFloorRef.current = clearFloor;
   });
   const [ready, setReady] = useState(false);
 
@@ -77,6 +83,7 @@ export function SwarmBoard({
     const stop = startSwarmAdapter({
       sessionId,
       getKeys: () => taskKeysRef.current,
+      getFloor: () => clearFloorRef.current,
       workers: workersRef.current,
       onEvent: (ev) => {
         controller.apply(ev);

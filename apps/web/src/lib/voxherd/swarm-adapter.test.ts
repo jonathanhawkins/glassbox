@@ -1,7 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { norm, isActive, isComplete, selectActiveTasks, MAX_ACTIVE } from "./swarm-adapter.ts";
+import {
+  norm,
+  isActive,
+  isComplete,
+  selectActiveTasks,
+  filterClearedTasks,
+  MAX_ACTIVE,
+} from "./swarm-adapter.ts";
 
 // Pins the swarm adapter's task FILTERING: the pure filter / sort / cap the board's poll lifts a
 // conductor task list into the active backlog it draws as beads. The board shows only active-status
@@ -116,4 +123,52 @@ test("selectActiveTasks does not mutate its input array", () => {
     before,
     "filter/sort must operate on a copy, leaving the caller's array order intact",
   );
+});
+
+// --- filterClearedTasks: the header "clear" snapshot -------------------------------------------
+// A clear records the task ids visible at that moment, scoped to the list KEY they resolved
+// from. Same key -> those ids stay hidden (a reload or the next poll cannot resurrect the
+// cleared run); a DIFFERENT key (the next run's fresh planner list restarts numbering at 1)
+// is untouched, so a new plan with overlapping ids still shows in full.
+
+test("filterClearedTasks hides the snapshotted ids when the same key resolves", () => {
+  const floor = { mailId: 10, taskKey: "planner-a", taskIds: ["1", "2", "3"] };
+  const tasks = [
+    { id: 1, status: "completed" },
+    { id: 2, status: "completed" },
+    { id: 3, status: "pending" },
+    { id: 4, status: "pending" },
+  ];
+  const out = filterClearedTasks("planner-a", tasks, floor);
+  assert.deepEqual(
+    out.map((t) => t.id),
+    [4],
+    "cleared ids 1-3 hidden regardless of status; the post-clear task 4 stays",
+  );
+});
+
+test("filterClearedTasks leaves a different list key untouched", () => {
+  // The NEXT run spawns a fresh planner whose list restarts at 1; the old floor must not apply.
+  const floor = { mailId: 10, taskKey: "planner-a", taskIds: ["1", "2"] };
+  const tasks = [
+    { id: 1, status: "pending" },
+    { id: 2, status: "pending" },
+  ];
+  const out = filterClearedTasks("planner-b", tasks, floor);
+  assert.deepEqual(out.map((t) => t.id), [1, 2]);
+});
+
+test("filterClearedTasks without a floor returns a copy, not the input array", () => {
+  const tasks = [{ id: 1, status: "pending" }];
+  const out = filterClearedTasks("any", tasks, null);
+  assert.deepEqual(out, tasks);
+  assert.notEqual(out, tasks, "callers mutate/sort the result; the input must stay intact");
+  assert.deepEqual(filterClearedTasks("any", tasks, undefined), tasks);
+});
+
+test("filterClearedTasks matches numeric task ids against string snapshot ids", () => {
+  // The poll's tasks carry numeric ids; Object.keys(tasks) snapshots strings. Same task.
+  const floor = { mailId: 0, taskKey: "k", taskIds: ["7"] };
+  const out = filterClearedTasks("k", [{ id: 7 }, { id: 8 }], floor);
+  assert.deepEqual(out.map((t) => t.id), [8]);
 });

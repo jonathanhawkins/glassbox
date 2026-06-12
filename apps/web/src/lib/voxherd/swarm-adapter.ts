@@ -52,6 +52,33 @@ export function selectActiveTasks<T extends { id: string | number; status?: stri
 }
 
 /**
+ * The header's "clear" snapshot for one conductor: everything on the board at clear time stays
+ * hidden afterwards. Mail is floored by id (the feed's ids are monotonic), tasks by the exact
+ * ids visible in the resolved list. The snapshot is scoped to the task-list KEY it was taken
+ * from, because a NEXT run spawns a fresh planner whose list restarts numbering at 1; without
+ * the key scope, the old run's cleared ids would swallow the new run's plan.
+ */
+export interface ClearFloor {
+  /** Hide mail with id <= this (0 = hide nothing). */
+  mailId: number;
+  /** The task-list key (session id / project) the task snapshot came from. */
+  taskKey: string;
+  /** Task ids visible at clear time; hidden while the same key resolves. */
+  taskIds: string[];
+}
+
+/** Drop the tasks a clear snapshotted, when (and only when) the same list key resolved. */
+export function filterClearedTasks<T extends { id: string | number }>(
+  key: string,
+  tasks: readonly T[],
+  floor?: ClearFloor | null,
+): T[] {
+  if (!floor || floor.taskKey !== key) return [...tasks];
+  const cleared = new Set(floor.taskIds);
+  return tasks.filter((t) => !cleared.has(String(t.id)));
+}
+
+/**
  * Resolve the swarm's task list. Each session writes to its OWN task list (keyed by session id,
  * not project name), so a spawned swarm's plan lives under the planner's session id, an in-session
  * rail loop under the conductor's, and a legacy run under the project name. We try the candidate
@@ -83,10 +110,13 @@ export function startSwarmAdapter(opts: {
   // A getter, not a static value, so the adapter picks up the planner key the instant it spawns
   // without re-subscribing.
   getKeys: () => string[];
+  // The conductor's clear snapshot (or null). A getter for the same reason as getKeys: the
+  // operator can hit "clear" mid-run and the very next tick must stop re-creating those beads.
+  getFloor?: () => ClearFloor | null;
   workers?: number;
   onEvent: (ev: GlassboxEvent) => void;
 }): () => void {
-  const { getKeys, onEvent } = opts;
+  const { getKeys, getFloor, onEvent } = opts;
   const runId = `swarm-${opts.sessionId}`;
   let alive = true;
   const phaseOf = new Map<string, string>(); // taskId -> "queued" | "done"
@@ -100,8 +130,10 @@ export function startSwarmAdapter(opts: {
   };
 
   const tick = async () => {
-    const { tasks } = await fetchSwarmTasks(getKeys());
+    const { key, tasks: fetched } = await fetchSwarmTasks(getKeys());
     if (!alive) return;
+    // Cleared tasks never re-seed beads, including after a reload (phaseOf restarts empty).
+    const tasks = filterClearedTasks(key, fetched, getFloor?.());
 
     // The active tasks = the backlog. Newest first, capped for legibility.
     const active = selectActiveTasks(tasks);

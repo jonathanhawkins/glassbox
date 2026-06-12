@@ -14,7 +14,7 @@ import type { Editor } from "tldraw";
 import type { GlassboxEvent } from "@glassbox/contract";
 
 import { sendCommand, submitSession } from "@/lib/voxherd/client";
-import { fetchSwarmTasks } from "@/lib/voxherd/swarm-adapter";
+import { fetchSwarmTasks, filterClearedTasks, type ClearFloor } from "@/lib/voxherd/swarm-adapter";
 import type { VoxSession } from "@/lib/voxherd/types";
 import { openTerminalStream, killSession } from "@/lib/voxherd/ws";
 import { spawnSwarm, conductorBlueprint } from "@/lib/voxherd/swarm-spawn";
@@ -91,7 +91,28 @@ export function SwarmView() {
     "console",
   );
   // Live agent-to-agent coordination feed (the REAL Agent Mail the spawned swarm uses).
-  const [mail, setMail] = useState<{ id: number; from: string; subject: string; importance: string; ts: string }[]>([]);
+  // Raw as fetched; the `mail` everything reads is this minus the conductor's clear floor.
+  const [mailRaw, setMailRaw] = useState<{ id: number; from: string; subject: string; importance: string; ts: string }[]>([]);
+  // Per-PROJECT "clear" snapshots (header button), persisted so a cleared run stays cleared
+  // across reloads: mail at/below the floor id and the snapshotted task ids are hidden. Keyed
+  // by project (not conductor session id) because /clear ROLLS the conductor's session id; a
+  // floor keyed by the old id would stop applying the instant the clear succeeded. The revive
+  // drops malformed entries so an old localStorage shape can never crash the filters.
+  const [clearFloors, setClearFloors] = usePersistentState<Record<string, ClearFloor>>(
+    "glassbox-swarm-clear-floors-v2",
+    {},
+    (raw) => {
+      if (!raw || typeof raw !== "object") return {};
+      const out: Record<string, ClearFloor> = {};
+      for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        const f = v as Partial<ClearFloor> | null;
+        if (f && typeof f.mailId === "number" && typeof f.taskKey === "string" && Array.isArray(f.taskIds)) {
+          out[k] = { mailId: f.mailId, taskKey: f.taskKey, taskIds: f.taskIds.map(String) };
+        }
+      }
+      return out;
+    },
+  );
   const [railOpen, setRailOpen] = usePersistentState("glassbox-swarm-rail-open-v1", false);
   const [activityOpen, setActivityOpen] = usePersistentState(
     "glassbox-swarm-activity-open-v1",
@@ -100,6 +121,9 @@ export function SwarmView() {
   const [tasks, setTasks] = useState<
     Record<string, { subject?: string; description?: string; status?: string }>
   >({});
+  // Which candidate key the task poll actually resolved (planner session / conductor / project);
+  // a clear snapshots ids against THIS key so a future run's fresh list is never affected.
+  const [taskListKey, setTaskListKey] = useState("");
   const [picked, setPicked] = useState<{ id: string; x: number; y: number } | null>(null);
   const [subDetail, setSubDetail] = useState<Record<string, { subject: string; description?: string }>>({});
   const [workerTasks, setWorkerTasks] = useState<Record<string, string[]>>({});
@@ -191,6 +215,19 @@ export function SwarmView() {
   const run = useSwarmRun(conductor?.project);
   const swarms = useSwarms();
 
+  // This project's clear snapshot, and the mail feed with it applied. Everything downstream
+  // (counts, lane routing, badges, the mail tab) reads the FILTERED feed, so one "clear" makes
+  // the whole board agree: cleared mail can't re-route beads or re-mark tasks done.
+  const conductorProj = conductor?.project ?? "";
+  const clearFloor = useMemo(
+    () => clearFloors[conductorProj] ?? null,
+    [clearFloors, conductorProj],
+  );
+  const mail = useMemo(
+    () => (clearFloor ? mailRaw.filter((m) => m.id > clearFloor.mailId) : mailRaw),
+    [mailRaw, clearFloor],
+  );
+
   // Poll the real Agent Mail feed (mcp-agent-mail, via /api/agentmail) while the console OR the
   // rail is open, so both the mail tab and the activity log can watch the swarm assign + report
   // work, the other half of the task list beads.
@@ -200,8 +237,8 @@ export function SwarmView() {
     const tick = () =>
       fetch("/api/agentmail?limit=60", { cache: "no-store" })
         .then((r) => r.json())
-        .then((d: { messages?: typeof mail }) => {
-          if (alive && d.messages) setMail(d.messages);
+        .then((d: { messages?: typeof mailRaw }) => {
+          if (alive && d.messages) setMailRaw(d.messages);
         })
         .catch(() => {});
     void tick();
@@ -387,8 +424,11 @@ export function SwarmView() {
     if (!project || taskKeys.length === 0) return;
     let alive = true;
     const tick = async () => {
-      const { tasks: list } = await fetchSwarmTasks(taskKeys);
+      const { key, tasks: fetched } = await fetchSwarmTasks(taskKeys);
       if (!alive) return;
+      setTaskListKey(key);
+      // A cleared run's tasks stay hidden from the counts (and never re-enter the cache).
+      const list = filterClearedTasks(key, fetched, clearFloor);
       const byId: Record<string, { subject?: string; description?: string; status?: string }> = {};
       for (const t of list) {
         const id = String(t.id);
@@ -412,7 +452,7 @@ export function SwarmView() {
       alive = false;
       clearInterval(id);
     };
-  }, [conductor?.project, taskKeys]);
+  }, [conductor?.project, taskKeys, clearFloor]);
 
   // A bead click on the board dispatches glassbox:bead-click; open a task-detail card.
   useEffect(() => {
@@ -790,6 +830,64 @@ export function SwarmView() {
     },
     [conductor],
   );
+
+  // Header "clear": retire the finished run in one click. Snapshots a persisted floor (every
+  // mail id and task id currently visible stays hidden, so the run cannot resurrect on reload
+  // or on the next poll), resets the board's beads + the shape monitors, and sends /clear to
+  // the conductor session so its context is fresh for the next run. Spawned workers are NOT
+  // killed here; that stays "clean up".
+  const clearRun = useCallback(async () => {
+    if (!conductor) return;
+    const { project, session_id: oldSid } = conductor;
+    const mailId = mailRaw.reduce((top, m) => Math.max(top, m.id), 0);
+    setClearFloors((prev) => ({
+      ...prev,
+      [project]: { mailId, taskKey: taskListKey, taskIds: Object.keys(tasks) },
+    }));
+    setTasks({});
+    controllerRef.current?.clearBeads();
+    mailRouteRef.current = new Map();
+    doneBeadRef.current = new Set();
+    sweepRef.current = initSweep();
+    climbRef.current = initClimb();
+    setClimbMetric({ value: null, higherIsBetter: true });
+    setRealStop({ reason: "", round: 0 });
+    swarmCache.log(project, { kind: "note", text: "run cleared: board reset, /clear sent to conductor" });
+    const sentAt = Date.now();
+    await sendToConductor("/clear");
+    // /clear ROLLS the Claude Code session: the conductor re-registers under a NEW session id
+    // and the old one deregisters, so the saved selection would dangle on "pick a session".
+    // Follow it: poll the registry until a session in this project registers fresh (newer than
+    // the moment we sent /clear, allowing a little clock skew), then re-select it.
+    setNote("run cleared, conductor restarting…");
+    for (let i = 0; i < 10; i += 1) {
+      await new Promise((r) => setTimeout(r, 1200));
+      try {
+        const res = await fetch("/api/voxherd/api/sessions", { cache: "no-store" });
+        const reg = (await res.json()) as Record<
+          string,
+          { session_id: string; project: string; registered_at?: string }
+        >;
+        const fresh = Object.values(reg)
+          .filter(
+            (s) =>
+              s.project === project &&
+              s.session_id !== oldSid &&
+              Date.parse(s.registered_at ?? "") > sentAt - 5000,
+          )
+          .sort((a, b) => String(b.registered_at ?? "").localeCompare(String(a.registered_at ?? "")));
+        if (fresh.length) {
+          setConductorId(fresh[0].session_id);
+          setNote("run cleared");
+          return;
+        }
+      } catch {
+        /* registry poll is best-effort; retry until the window closes */
+      }
+    }
+    setNote("run cleared (re-pick the conductor if it dropped)");
+    // setClearFloors / setConductorId are stable usePersistentState setters, listed for the lint rule.
+  }, [conductor, mailRaw, tasks, taskListKey, sendToConductor, setClearFloors, setConductorId]);
 
   // Running an archetype drives the conductor through the real cycle round by round (the loop
   // kernel re-prompts: decompose -> dispatch to sub-agents -> coordinator verifies -> repeat
@@ -1186,6 +1284,7 @@ export function SwarmView() {
               key={conductor.session_id}
               sessionId={conductor.session_id}
               taskKeys={taskKeys}
+              clearFloor={clearFloor}
               onReady={onBoardReady}
               onEvent={onBoardEvent}
               workers={workers}
@@ -1276,6 +1375,16 @@ export function SwarmView() {
               <span className="text-accent">{counts.working} working</span>
               <span>{counts.queued} queued</span>
               <span>{counts.done} done</span>
+              {(counts.working + counts.queued + counts.done > 0 || mail.length > 0) && (
+                <button
+                  type="button"
+                  onClick={() => void clearRun()}
+                  className="rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim transition hover:border-accent/40 hover:text-ink"
+                  title="clear the run: retire the board's task beads + mail, reset the stop monitor, and /clear the conductor session for a fresh start (spawned workers stay; use clean up to kill them)"
+                >
+                  clear
+                </button>
+              )}
             </span>
           )}
           {note && <span className="text-xs text-ink-dim">{note}</span>}
