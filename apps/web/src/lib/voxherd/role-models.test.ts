@@ -71,6 +71,16 @@ test("reviveSwarmModels does not mutate DEFAULT_SWARM_MODELS and returns a fresh
   assert.notEqual(out.worker, DEFAULT_SWARM_MODELS.worker);
 });
 
+test("reviveSwarmModels sanitizes a saved entry to exactly { model, effort }, dropping extra fields", () => {
+  // A persisted entry may carry stale extra keys (an old schema, or a hand-edited localStorage
+  // blob). revive rebuilds each role as a fresh { model, effort }, so leftover fields never leak.
+  const out = reviveSwarmModels({
+    worker: { model: "haiku", effort: "low", stale: true, ts: 123 } as never,
+  });
+  assert.deepEqual(out.worker, { model: "haiku", effort: "low" });
+  assert.deepEqual(Object.keys(out.worker).sort(), ["effort", "model"]);
+});
+
 // roleKeyOf maps a board node name to the config row that drives its model/effort.
 
 test("roleKeyOf folds every worker-N onto the single 'worker' row", () => {
