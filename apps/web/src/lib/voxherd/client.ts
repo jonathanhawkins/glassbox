@@ -37,12 +37,22 @@ export async function sendCommand(input: {
   message: string;
   session_id?: string;
 }): Promise<CommandResult> {
-  const res = await fetch(`${BASE}/api/command`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  return (await res.json().catch(() => ({ error: "bad_response" }))) as CommandResult;
+  // No auto-retry on a murky response: the bridge may have ALREADY typed the message into the
+  // session, and a retry would type it twice. Classify instead: a 2xx with an unparseable body
+  // means the command was accepted (the body is cosmetic), so don't surface a false
+  // "failed: bad_response" in the header mid-spawn; a non-2xx or a network throw is a real failure.
+  try {
+    const res = await fetch(`${BASE}/api/command`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const parsed = (await res.json().catch(() => null)) as CommandResult | null;
+    if (parsed) return parsed;
+    return res.ok ? { ok: true } : { ok: false, error: `http_${res.status}` };
+  } catch {
+    return { ok: false, error: "network" };
+  }
 }
 
 /**

@@ -47,6 +47,8 @@ export function stepSweep(prev: SweepState, obs: LoopObservation): SweepState {
 // --- Climb: stop when the metric stops improving (plateau) -----------------------------------
 
 export interface ClimbState {
+  /** The first reading (NaN until it lands). Kept so the gauge can show baseline -> best. */
+  baseline: number;
   /** Best metric seen so far (NaN until the first reading establishes the baseline). */
   best: number;
   /** The metric improved past its baseline at least once (so a flat/maxed metric never plateaus). */
@@ -71,7 +73,7 @@ export const CLIMB_STALL_STREAK = 3;
 export const CLIMB_STALL_SPACING_MS = 60_000;
 
 export function initClimb(): ClimbState {
-  return { best: NaN, climbed: false, stallStreak: 0, windowTs: NaN, reason: "" };
+  return { baseline: NaN, best: NaN, climbed: false, stallStreak: 0, windowTs: NaN, reason: "" };
 }
 
 /** One leaderboard observation feeding the Climb monitor. `metric` is null when no reading yet. */
@@ -100,11 +102,11 @@ export function stepClimb(
   if (obs.shapeId !== "climb" || obs.metric == null || Number.isNaN(obs.metric)) return prev;
   const m = obs.metric;
   if (Number.isNaN(prev.best)) {
-    return { best: m, climbed: false, stallStreak: 0, windowTs: obs.ts, reason: "" }; // baseline
+    return { baseline: m, best: m, climbed: false, stallStreak: 0, windowTs: obs.ts, reason: "" };
   }
   const better = higherIsBetter ? m > prev.best : m < prev.best;
   if (better) {
-    return { best: m, climbed: true, stallStreak: 0, windowTs: obs.ts, reason: "" }; // climbed
+    return { ...prev, best: m, climbed: true, stallStreak: 0, windowTs: obs.ts, reason: "" };
   }
   if (!prev.climbed) return prev; // never improved past the baseline: keep waiting, not a plateau
   if (!(obs.ts - prev.windowTs >= CLIMB_STALL_SPACING_MS)) return prev; // window still open

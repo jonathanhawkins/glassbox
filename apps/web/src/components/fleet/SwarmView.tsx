@@ -25,6 +25,7 @@ import { ArchetypeRail } from "@/components/fleet/ArchetypeRail";
 import { SkillsMenu } from "@/components/fleet/SkillsMenu";
 import { AnsiLines } from "@/components/fleet/AnsiLines";
 import { ActivityFeed, type ActivityEntry } from "@/components/fleet/ActivityFeed";
+import { LeaderboardRail } from "@/components/fleet/LeaderboardRail";
 import { CollapseButton } from "@/components/cockpit/CollapseButton";
 import { ModelsMenu } from "@/components/fleet/ModelsMenu";
 import {
@@ -179,6 +180,13 @@ export function SwarmView() {
   // lib/fleet/loop-monitor). v1 handles Sweep (backlog drained). `realStop.reason` is "" while
   // running, "done" once the condition is reached.
   const [realStop, setRealStop] = useState<{ reason: string; round: number }>({ reason: "", round: 0 });
+  // The climb monitor's published numbers for the edge gauge ("269 -> 141 ms"): the monitor
+  // effect mirrors climbRef's baseline/best here, since render (the loopStatus memo) must not
+  // read the ref directly.
+  const [climbGauge, setClimbGauge] = useState<{ baseline: number | null; best: number | null }>({
+    baseline: null,
+    best: null,
+  });
   const sweepRef = useRef<SweepState>(initSweep());
   const climbRef = useRef<ClimbState>(initClimb());
   // The live metric a Climb run pushes, read from the leaderboard (prefer wall_ms = perf, lower
@@ -861,6 +869,7 @@ export function SwarmView() {
     sweepRef.current = initSweep();
     climbRef.current = initClimb();
     setClimbMetric({ value: null, higherIsBetter: true });
+    setClimbGauge({ baseline: null, best: null });
     setRealStop({ reason: "", round: 0 });
     // The activity rail + history tab reflect the cleared run too: wipe the cached timeline
     // and beads (roles survive; see swarmCache.clearRun). No marker entry on purpose, an
@@ -975,6 +984,7 @@ export function SwarmView() {
       sweepRef.current = initSweep();
       climbRef.current = initClimb();
       setClimbMetric({ value: null, higherIsBetter: true });
+      setClimbGauge({ baseline: null, best: null });
       setRealStop({ reason: "", round: 0 });
       setSpawning(true);
       setNote(`spawning real swarm (${shape.name} loop)…`);
@@ -1119,9 +1129,15 @@ export function SwarmView() {
       );
       climbRef.current = next;
       nextReason = next.reason;
+      // Publish baseline/best for the edge gauge (render can't read the ref).
+      const baseline = Number.isNaN(next.baseline) ? null : next.baseline;
+      const best = Number.isNaN(next.best) ? null : next.best;
+      if (baseline !== climbGauge.baseline || best !== climbGauge.best) {
+        setClimbGauge({ baseline, best });
+      }
     }
     if (nextReason !== realStop.reason) setRealStop({ reason: nextReason, round: 0 });
-  }, [counts, climbMetric, loopShapeId, loop, nodeSessions, realStop.reason]);
+  }, [counts, climbMetric, loopShapeId, loop, nodeSessions, realStop.reason, climbGauge]);
 
   // Climb's metric source: poll the leaderboard ONLY while a Climb is armed on a real swarm. The
   // validator updates it (glassbox:planner_scores via harness/eval.py) as it improves. Prefer
@@ -1235,6 +1251,17 @@ export function SwarmView() {
     // The kernel loop ("Run") drives its own status; a spawned real swarm has no kernel, so fall
     // back to the real-swarm shape monitor (realStop) for running/round/reason.
     const realRunning = Object.keys(nodeSessions).length > 0 && Boolean(loopShapeId) && realStop.reason === "";
+    // The climb gauge's numbers, published by the monitor effect (render can't read climbRef).
+    const metric =
+      loopShapeId === "climb" && climbMetric.value != null
+        ? {
+            value: climbMetric.value,
+            baseline: climbGauge.baseline,
+            best: climbGauge.best,
+            unit: climbMetric.higherIsBetter ? "" : "ms",
+            higherIsBetter: climbMetric.higherIsBetter,
+          }
+        : undefined;
     return {
       id: loopShapeId,
       running: loop?.running ?? realRunning,
@@ -1242,8 +1269,9 @@ export function SwarmView() {
       maxRounds: loop?.maxRounds ?? 0,
       reason: loop?.reason ?? realStop.reason,
       counts,
+      metric,
     };
-  }, [loopShapeId, loop, counts, realStop, nodeSessions]);
+  }, [loopShapeId, loop, counts, realStop, nodeSessions, climbMetric, climbGauge]);
 
   // The activity log: normalize the swarm's two persistent live sources into one chronological
   // stream (newest first). The run log already carries the conductor's sub-agent dispatches and
@@ -1771,6 +1799,9 @@ export function SwarmView() {
               </div>
               {activityOpen && <ActivityFeed entries={activity} onSelect={onSelectActivity} />}
             </div>
+            {/* The oracle's scoreboard: per-version wall_ms/accuracy + the Weave Evaluation
+                deep links. Self-hides until a score exists. */}
+            <LeaderboardRail />
             <div className="mt-4 flex min-h-0 flex-[2] flex-col border-t border-line pt-3">
               <SkillsMenu
                 onGive={giveSkill}

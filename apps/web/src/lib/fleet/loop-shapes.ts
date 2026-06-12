@@ -27,7 +27,7 @@ export interface LoopShapeSpec {
   /** Draw the stream inlet feeding the planner (watch). */
   inlet?: boolean;
   /** What the live gauge counts alongside the label. */
-  gauge: "round" | "drain" | "finds" | "none";
+  gauge: "round" | "drain" | "finds" | "metric" | "none";
 }
 
 export const LOOP_SHAPES: Record<string, LoopShapeSpec> = {
@@ -45,7 +45,7 @@ export const LOOP_SHAPES: Record<string, LoopShapeSpec> = {
     edgeLabel: "while it improves",
     doneLabel: "plateau: best kept",
     roles: { validator: "measure the metric", improver: "push the best up" },
-    gauge: "round",
+    gauge: "metric",
   },
   hold: {
     id: "hold",

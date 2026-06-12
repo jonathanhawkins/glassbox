@@ -17,6 +17,19 @@ export type LoopShapeStatus = {
   reason: string;
   /** Live task counts from the conductor's task list (the gauge's numbers). */
   counts: { queued: number; working: number; done: number };
+  /**
+   * The live Climb metric for the edge gauge: the leaderboard reading plus the monitor's
+   * baseline/best, so the edge can show the whole climb ("269 -> 141 ms"). Absent for
+   * shapes without a metric.
+   */
+  metric?: {
+    value: number | null;
+    baseline: number | null;
+    best: number | null;
+    /** "" for a unitless metric (accuracy); "ms" for a latency climb. */
+    unit: string;
+    higherIsBetter: boolean;
+  };
 };
 
 export const LoopShapeContext = createContext<LoopShapeStatus | null>(null);

@@ -52,16 +52,29 @@ def _update_leaderboard(task_name: str, planner_version: int, accuracy: float) -
         return False
 
 
-def _update_meta(task_name: str, planner_version: int, accuracy: float, wall_ms: int) -> bool:
-    """Mirror per-version detail (wall_ms) into the planner-meta hash. Best-effort.
+def _update_meta(
+    task_name: str,
+    planner_version: int,
+    accuracy: float,
+    wall_ms: int,
+    weave_url: str | None = None,
+) -> bool:
+    """Mirror per-version detail (wall_ms + the Weave Evaluation link) into the planner-meta
+    hash. Best-effort.
 
-    The cockpit leaderboard route reads wall_ms from glassbox:planner_meta:{task}; the live
-    validator writes it via agents.bus.set_planner_meta, so a CLI grade must too or a perf
-    Climb has no metric. Same merge semantics as the bus writer: read the existing JSON row,
-    merge, write back, never blanking another writer's fields.
+    The cockpit leaderboard route reads wall_ms and weave_eval_url from
+    glassbox:planner_meta:{task}; the live validator writes them via agents.bus.set_planner_meta,
+    so a CLI grade must too or a perf Climb has no metric and no Weave deep link. Same merge
+    semantics as the bus writer: read the existing JSON row, merge, write back, never blanking
+    another writer's fields.
     """
-    if wall_ms <= 0:
-        return False
+    fields: dict = {"version": int(planner_version), "accuracy": float(accuracy)}
+    if wall_ms > 0:
+        fields["wall_ms"] = int(wall_ms)
+    if weave_url:
+        fields["weave_eval_url"] = weave_url
+    if len(fields) <= 2:
+        return False  # nothing beyond version/accuracy to mirror
     try:
         import redis as redis_lib
 
@@ -78,7 +91,7 @@ def _update_meta(task_name: str, planner_version: int, accuracy: float, wall_ms:
                 record = json.loads(raw)
             except (TypeError, ValueError):
                 record = {}
-        record.update({"version": int(planner_version), "accuracy": float(accuracy), "wall_ms": int(wall_ms)})
+        record.update(fields)
         r.hset(key, field, json.dumps(record))
         return True
     except Exception as exc:  # noqa: BLE001 - meta is best-effort, same as the leaderboard
@@ -143,7 +156,13 @@ def evaluate(
     accuracy = float(result.score)
     logged = weave_eval.log_planner_eval(task_name, planner_version, result)
     leaderboard_updated = _update_leaderboard(task_name, planner_version, accuracy)
-    _update_meta(task_name, planner_version, accuracy, int(getattr(result, "wall_ms", 0) or 0))
+    _update_meta(
+        task_name,
+        planner_version,
+        accuracy,
+        int(getattr(result, "wall_ms", 0) or 0),
+        weave_url=logged.get("url"),
+    )
     if emit_event and run_id:
         _emit_rewrite_event(task_name, run_id, planner_version, accuracy)
 

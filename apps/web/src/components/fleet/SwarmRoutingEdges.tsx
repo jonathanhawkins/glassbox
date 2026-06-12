@@ -287,7 +287,9 @@ function LoopShapeOverlay({
 
   const { running, reason, round, maxRounds, counts } = status;
   const ended = !running && reason !== "";
-  const genuine = reason === "done";
+  // "done" (Sweep/Land) and "plateau" (Climb) are both the shape's GENUINE stop condition,
+  // so both earn the green done-label chip; manual stops and errors stay muted prose.
+  const genuine = reason === "done" || reason === "plateau";
   // A hold loop has no "done"; releasing it by hand is its natural ending.
   const endText = genuine
     ? `${spec.doneLabel} ✓`
@@ -297,14 +299,27 @@ function LoopShapeOverlay({
   const endColor = genuine ? PASS : MUTED;
 
   const total = counts.queued + counts.working + counts.done;
+  // Climb's gauge is the metric itself: "269 → 141 ms" once it has climbed (the whole run's
+  // story at a glance), the lone best reading before that. Numbers come straight from the
+  // monitor's baseline/best.
+  const m = status.metric;
+  const fmtM = (v: number) => (Number.isInteger(v) ? String(v) : v.toFixed(3));
+  const metricGauge =
+    m && m.best != null && m.baseline != null && m.best !== m.baseline
+      ? `${fmtM(m.baseline)} → ${fmtM(m.best)}${m.unit ? ` ${m.unit}` : ""}`
+      : m && (m.best ?? m.value) != null
+        ? `best ${fmtM((m.best ?? m.value) as number)}${m.unit ? ` ${m.unit}` : ""}`
+        : "";
   const gauge =
     spec.gauge === "drain"
       ? `drained ${counts.done}/${total}${round ? ` · round ${round}` : ""}`
       : spec.gauge === "finds"
         ? `${counts.done} found${round ? ` · round ${round}` : ""}`
-        : spec.gauge === "round" && round
-          ? `round ${round}/${maxRounds}`
-          : "";
+        : spec.gauge === "metric"
+          ? metricGauge
+          : spec.gauge === "round" && round
+            ? `round ${round}/${maxRounds}`
+            : "";
 
   const parts: ReactNode[] = [];
   // Where the label / end chip sits; set per edge kind below.
