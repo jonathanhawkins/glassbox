@@ -61,6 +61,12 @@ export function FleetView() {
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-line bg-raised/60 p-0.5">
           <Link
+            href="/swarm"
+            className="rounded-md bg-accent/15 px-2.5 py-1 font-mono text-[11px] font-medium text-accent transition hover:bg-accent/25"
+          >
+            swarm ↗
+          </Link>
+          <Link
             href="/board"
             className="rounded-md px-2.5 py-1 font-mono text-[11px] font-medium text-ink-dim transition hover:text-ink"
           >
