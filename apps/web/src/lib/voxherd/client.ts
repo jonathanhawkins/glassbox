@@ -69,3 +69,27 @@ export async function submitSession(input: {
 }): Promise<CommandResult> {
   return sendCommand({ ...input, message: " " });
 }
+
+/**
+ * Save an image pasted into a cockpit input to disk (POST /api/paste-image) and get back its
+ * absolute path. The path is then typed into the conductor/worker session, where Claude Code
+ * Reads it: tmux send-keys carries text, so a pasted screenshot reaches the swarm as a file path.
+ */
+export async function uploadPastedImage(
+  file: Blob,
+): Promise<{ ok: boolean; path?: string; error?: string }> {
+  try {
+    const res = await fetch("/api/paste-image", {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    const data = (await res.json().catch(() => null)) as
+      | { ok?: boolean; path?: string; error?: string }
+      | null;
+    if (!data) return { ok: false, error: `http_${res.status}` };
+    return { ok: Boolean(data.ok), path: data.path, error: data.error };
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}

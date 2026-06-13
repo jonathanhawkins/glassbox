@@ -6,14 +6,24 @@
 // This unifies the three projects in one seat: vibe-view UX + voxherd workers + skillvault
 // skills + the node board.
 
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { Editor } from "tldraw";
 import type { GlassboxEvent } from "@glassbox/contract";
 
-import { sendCommand, submitSession } from "@/lib/voxherd/client";
+import { sendCommand, submitSession, uploadPastedImage } from "@/lib/voxherd/client";
 import { fetchSwarmTasks, filterClearedTasks, type ClearFloor } from "@/lib/voxherd/swarm-adapter";
 import type { VoxSession } from "@/lib/voxherd/types";
 import { openTerminalStream, killSession } from "@/lib/voxherd/ws";
@@ -75,6 +85,60 @@ const WORKER_CHOICES = [1, 2, 3, 4];
 const SELECT_CLS =
   "rounded-md border border-line bg-canvas/70 px-2 py-1 text-xs text-ink outline-none focus:border-accent/60";
 
+// A screenshot pasted into one of the entry fields. We keep the on-disk path (what gets sent to
+// the session) plus a blob: object URL built from the clipboard File (the thumbnail, no refetch).
+interface PastedImage {
+  id: string; // the path doubles as a stable key (uuid filename)
+  path: string;
+  url: string;
+  name: string;
+}
+
+// A submit carries the attached image paths first, then whatever text was typed, on one line so
+// the conductor's single-line submit path still applies (a path is just text to tmux send-keys).
+const composeMessage = (images: PastedImage[], text: string) =>
+  [...images.map((i) => i.path), text.trim()].filter(Boolean).join(" ");
+
+// Pasted-image thumbnails shown above an entry field, each with a remove affordance. Mirrors the
+// fleet cards' framed-preview look (rounded, hairline border, one orange accent on hover).
+function PastedImageStrip({
+  images,
+  onRemove,
+  size = "h-10 w-10",
+  className = "",
+}: {
+  images: PastedImage[];
+  onRemove: (id: string) => void;
+  size?: string;
+  className?: string;
+}) {
+  if (images.length === 0) return null;
+  return (
+    <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
+      {images.map((img) => (
+        <span key={img.id} className="group relative shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element -- blob: object URL, next/image can't optimize it */}
+          <img
+            src={img.url}
+            alt={img.name}
+            title={img.name}
+            className={`${size} rounded-md border border-line object-cover transition group-hover:border-accent/50`}
+          />
+          <button
+            type="button"
+            onClick={() => onRemove(img.id)}
+            className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full border border-line bg-raised text-[10px] leading-none text-ink-dim transition hover:border-accent/50 hover:text-ink"
+            title="remove image"
+            aria-label="remove image"
+          >
+            &times;
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function SwarmView() {
   // Shared, reference-counted session poller (same interval as FleetView/FleetBoard).
   const { sessions } = useSessions();
@@ -85,6 +149,11 @@ export function SwarmView() {
   const [workers, setWorkers] = usePersistentState("glassbox-swarm-workers-v1", 4);
   const [note, setNote] = useState("");
   const [input, setInput] = useState("");
+  // Screenshots pasted into each entry field (header goal, conductor console, worker console),
+  // shown as thumbnails and sent as file paths on submit. Transient: blob URLs can't be revived.
+  const [goalImages, setGoalImages] = useState<PastedImage[]>([]);
+  const [conductorImages, setConductorImages] = useState<PastedImage[]>([]);
+  const [workerImages, setWorkerImages] = useState<PastedImage[]>([]);
   const [lines, setLines] = useState<string[]>([]);
   const [consoleOpen, setConsoleOpen] = usePersistentState("glassbox-swarm-console-open-v1", false);
   const [consoleTab, setConsoleTab] = usePersistentState<"console" | "history" | "mail">(
@@ -849,6 +918,59 @@ export function SwarmView() {
     [conductor],
   );
 
+  // Paste an image into any cockpit entry field (the header goal field, the conductor console, or
+  // a worker console): it uploads to disk and shows as a thumbnail above the field. On submit the
+  // file path rides into the local Claude Code session (tmux send-keys carries text, not binary,
+  // so a path is how an image reaches a session, which then Reads it). A plain-text paste is left
+  // untouched: we only intercept when the clipboard actually carries an image file.
+  const handleImagePaste = useCallback(
+    async (e: ClipboardEvent<HTMLInputElement>, addImage: Dispatch<SetStateAction<PastedImage[]>>) => {
+      const { items } = e.clipboardData;
+      let file: File | null = null;
+      for (let i = 0; i < items.length; i += 1) {
+        const it = items[i];
+        if (it.kind === "file" && it.type.startsWith("image/")) {
+          file = it.getAsFile();
+          break;
+        }
+      }
+      if (!file) return; // not an image: let the browser paste the text normally
+      e.preventDefault();
+      const url = URL.createObjectURL(file); // instant thumbnail, no refetch from disk
+      setNote("uploading pasted image…");
+      const r = await uploadPastedImage(file);
+      if (!r.ok || !r.path) {
+        URL.revokeObjectURL(url);
+        setNote(`image paste failed: ${r.error ?? "?"}`);
+        return;
+      }
+      const p = r.path;
+      addImage((prev) => [...prev, { id: p, path: p, url, name: p.split("/").pop() ?? "image" }]);
+      setNote(`image attached: ${p.split("/").pop() ?? "image"}`);
+    },
+    [],
+  );
+
+  // Drop one pasted thumbnail (and free its blob URL).
+  const removeImage = useCallback(
+    (setImages: Dispatch<SetStateAction<PastedImage[]>>, id: string) => {
+      setImages((prev) => {
+        const hit = prev.find((p) => p.id === id);
+        if (hit) URL.revokeObjectURL(hit.url);
+        return prev.filter((p) => p.id !== id);
+      });
+    },
+    [],
+  );
+
+  // Clear a field's thumbnails after it submits (free every blob URL).
+  const clearImages = useCallback((setImages: Dispatch<SetStateAction<PastedImage[]>>) => {
+    setImages((prev) => {
+      prev.forEach((p) => URL.revokeObjectURL(p.url));
+      return [];
+    });
+  }, []);
+
   // Header "clear": retire the finished run in one click. Snapshots a persisted floor (every
   // mail id and task id currently visible stays hidden, so the run cannot resurrect on reload
   // or on the next poll), resets the board's beads + the shape monitors, and sends /clear to
@@ -1378,9 +1500,15 @@ export function SwarmView() {
           <ModelsMenu value={swarmModels} onChange={setSwarmModels} workers={workers} />
           {conductor && (
             <span className="flex items-center gap-1.5 border-l border-line pl-3">
+              <PastedImageStrip
+                images={goalImages}
+                onRemove={(id) => removeImage(setGoalImages, id)}
+                size="h-6 w-6"
+              />
               <input
                 value={realGoal}
                 onChange={(e) => setRealGoal(e.target.value)}
+                onPaste={(e) => void handleImagePaste(e, setGoalImages)}
                 placeholder="what should the swarm do?"
                 spellCheck={false}
                 className={`w-56 rounded-md border bg-canvas/70 px-2 py-1 text-xs text-ink outline-none transition-colors placeholder:text-ink-dim focus:border-accent/60 ${
@@ -1403,8 +1531,12 @@ export function SwarmView() {
               </select>
               <button
                 type="button"
-                onClick={() => void launchRealSwarm(realGoal)}
-                disabled={spawning || !realGoal.trim()}
+                onClick={() =>
+                  void launchRealSwarm(composeMessage(goalImages, realGoal)).then(() =>
+                    clearImages(setGoalImages),
+                  )
+                }
+                disabled={spawning || (!realGoal.trim() && goalImages.length === 0)}
                 className="rounded-md border border-accent/40 bg-accent/15 px-2.5 py-1 text-[11px] font-semibold text-accent transition hover:bg-accent/25 disabled:opacity-40"
                 title="spawn dedicated planner, coordinator, worker, validator, and improver sessions running the selected loop shape"
               >
@@ -1521,12 +1653,23 @@ export function SwarmView() {
                 >
                   <AnsiLines lines={lines.length ? lines : ["streaming the conductor…"]} />
                 </pre>
+                <PastedImageStrip
+                  images={conductorImages}
+                  onRemove={(id) => removeImage(setConductorImages, id)}
+                  className="mt-1.5"
+                />
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
+                  onPaste={(e) => void handleImagePaste(e, setConductorImages)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && input.trim()) {
-                      void sendToConductor(input.trim()).then((ok) => ok && setInput(""));
+                    if (e.key === "Enter" && (input.trim() || conductorImages.length > 0)) {
+                      void sendToConductor(composeMessage(conductorImages, input)).then((ok) => {
+                        if (ok) {
+                          setInput("");
+                          clearImages(setConductorImages);
+                        }
+                      });
                     }
                   }}
                   placeholder="message the conductor…"
@@ -1682,14 +1825,21 @@ export function SwarmView() {
               >
                 <AnsiLines lines={workerLines.length ? workerLines : [`streaming ${pickedWorker}…`]} />
               </pre>
+              <PastedImageStrip
+                images={workerImages}
+                onRemove={(id) => removeImage(setWorkerImages, id)}
+                className="mt-2"
+              />
               <input
                 value={workerInput}
                 onChange={(e) => setWorkerInput(e.target.value)}
+                onPaste={(e) => void handleImagePaste(e, setWorkerImages)}
                 onKeyDown={(e) => {
                   const sid = nodeSessions[pickedWorker];
-                  if (e.key === "Enter" && workerInput.trim() && sid) {
-                    void sendToWorker(sid, workerInput.trim());
+                  if (e.key === "Enter" && (workerInput.trim() || workerImages.length > 0) && sid) {
+                    void sendToWorker(sid, composeMessage(workerImages, workerInput));
                     setWorkerInput("");
+                    clearImages(setWorkerImages);
                   }
                 }}
                 placeholder={`message ${pickedWorker}…`}
