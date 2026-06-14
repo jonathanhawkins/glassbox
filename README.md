@@ -144,17 +144,29 @@ brew install tmux          # macOS
 # sudo apt install tmux    # Debian/Ubuntu
 ```
 
-**2. Install and start voxherd-bridge** (the session daemon the cockpit proxies to):
+**2. Install voxherd-bridge** (the session daemon the cockpit proxies to):
 
 ```bash
 git clone https://github.com/jonathanhawkins/voxherd-bridge
 cd voxherd-bridge
+```
+
+Then run the daemon one of two ways, both serving the same bridge on `:7777`:
+
+**Desktop app (easiest on macOS).** voxherd-bridge ships a SwiftUI menu bar app
+(`macos/VoxHerdBridge/`, built with `bash macos/build-app.sh`) that launches and
+supervises the daemon, shows session status, and serves a QR code for mobile pairing.
+Linux has a GTK4 / Waybar panel and Windows a system-tray app, both beta.
+
+**CLI.** Run the Python bridge directly:
+
+```bash
 bash scripts/dev-setup.sh                # creates the venv and installs deps (macOS)
 source bridge/.venv/bin/activate
 python -m bridge start --tts             # serves :7777, auto-creates the tmux session
 ```
 
-Leave the bridge running in its own terminal. The cockpit auto-discovers it at
+Either way, leave the bridge running. The cockpit auto-discovers it at
 `http://localhost:7777` and reads its auth token from `~/.voxherd/auth_token`. Set
 `VOXHERD_BRIDGE_URL` or `VOXHERD_AUTH_TOKEN` only if your bridge runs elsewhere.
 
