@@ -1395,6 +1395,15 @@ export function SwarmView() {
     };
   }, [loopShapeId, loop, counts, realStop, nodeSessions, climbMetric, climbGauge]);
 
+  // The leaderboard is the graded climb's scoreboard. Gate it on the shape the cockpit is ACTUALLY
+  // on: the running shape while a loop/swarm is live, else the header selector (what the operator
+  // has the swarm set to next). The board's armed shape (loopShapeId) can outlive a past run, so
+  // keying off it alone left the leaderboard up on a Land run whose board still had a stale Climb
+  // armed. gauge "metric" uniquely marks the graded climb (only Climb measures a number).
+  const leaderboardShapeId = loopStatus.running ? loopShapeId : realShapeId;
+  const showLeaderboard =
+    leaderboardShapeId != null && LOOP_SHAPES[leaderboardShapeId]?.gauge === "metric";
+
   // The activity log: normalize the swarm's two persistent live sources into one chronological
   // stream (newest first). The run log already carries the conductor's sub-agent dispatches and
   // completions (auto-logged on bead transitions) plus the loop/skill lifecycle; the agent mail
@@ -1949,9 +1958,9 @@ export function SwarmView() {
               </div>
               {activityOpen && <ActivityFeed entries={activity} onSelect={onSelectActivity} />}
             </div>
-            {/* The oracle's scoreboard: per-version wall_ms/accuracy + the Weave Evaluation
-                deep links. Self-hides until a score exists. */}
-            <LeaderboardRail />
+            {/* The oracle's scoreboard: per-version wall_ms/accuracy + Weave Evaluation deep links.
+                Shown only on the graded climb (see showLeaderboard above); self-hides until a score exists. */}
+            {showLeaderboard && <LeaderboardRail />}
             <div className="mt-4 flex min-h-0 flex-[2] flex-col border-t border-line pt-3">
               <SkillsMenu
                 onGive={giveSkill}
