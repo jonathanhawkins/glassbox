@@ -153,12 +153,12 @@ cd voxherd-bridge
 
 Then run the daemon one of two ways, both serving the same bridge on `:7777`:
 
-**Desktop app (easiest on macOS).** voxherd-bridge ships a SwiftUI menu bar app
+**Desktop app (recommended on macOS).** voxherd-bridge ships a SwiftUI menu bar app
 (`macos/VoxHerdBridge/`, built with `bash macos/build-app.sh`) that launches and
 supervises the daemon, shows session status, and serves a QR code for mobile pairing.
 Linux has a GTK4 / Waybar panel and Windows a system-tray app, both beta.
 
-**CLI.** Run the Python bridge directly:
+**CLI (fallback).** Run the Python bridge directly:
 
 ```bash
 bash scripts/dev-setup.sh                # creates the venv and installs deps (macOS)
