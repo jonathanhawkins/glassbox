@@ -26,7 +26,7 @@ scored, and the improver reads the real eval failures back from Weave and rewrit
 planner skill, so accuracy climbs across versions (tokenizer ~0.17 to 1.00, the textkit
 task 0.52 to 1.00) with zero swarm code changed between tasks.
 
-![cockpit](docs/board-verify.png)
+![swarm command center](docs/command-center.png)
 
 ## The swarm
 
