@@ -1,9 +1,40 @@
 # Glassbox
 
-**A glass cockpit for swarms of real coding agents. Point it at live Claude Code,
-Codex, and Gemini sessions, choose one of 8 loop shapes, and watch the swarm decompose
-the goal, hand each piece to a sub-agent, and verify the work for real, every move
-animated on a tldraw board.**
+**Watch a team of AI helpers build real software, live, with every move on screen
+and the result graded for real.**
+
+![swarm command center](docs/command-center.png)
+
+Most AI is a "black box". You ask it something, an answer pops out, and you cannot
+see what happened in between. Glassbox is the opposite. It is a glass box: a team
+of AI helpers builds real software while you watch every step on a live board, a
+picture of the work that updates as it happens.
+
+Picture a small crew that builds things to order:
+
+- The **planner** takes one big goal, like "build this app", and splits it into
+  small tasks.
+- The **coordinator** hands each task to a helper who is free.
+- The **workers** write the real code, one task at a time.
+- The **validator** runs what they built and gives it an honest score, so no one
+  can just claim "it works".
+- The **improver** reads what failed and writes better instructions for the next
+  round, so the crew gets smarter as it goes.
+
+You also tell the crew when to stop: when the goal is done, when the score stops
+going up, when a pile of chores runs out, and a few more rules (the loop shapes
+below). Every task, handoff, and test appears on the board the instant it happens,
+so you are never left guessing what the AI is doing.
+
+That is the whole idea. Everything below is the nitty gritty, starting with the
+same thing said precisely.
+
+## The technical version
+
+A glass cockpit for swarms of real coding agents. Point it at live Claude Code,
+Codex, and Gemini sessions, choose one of 8 loop shapes, and watch the swarm
+decompose the goal, hand each piece to a sub-agent, and verify the work for real,
+every move animated on a tldraw board.
 
 The swarm is a fixed cast of roles (planner, coordinator, workers, validator,
 improver), and it runs two ways, same roles and same loop shapes either way. As **live
@@ -25,8 +56,6 @@ numbers). The workers write each edit with W&B Inference, the artifact is built 
 scored, and the improver reads the real eval failures back from Weave and rewrites the
 planner skill, so accuracy climbs across versions (tokenizer ~0.17 to 1.00, the textkit
 task 0.52 to 1.00) with zero swarm code changed between tasks.
-
-![swarm command center](docs/command-center.png)
 
 ## The swarm
 
