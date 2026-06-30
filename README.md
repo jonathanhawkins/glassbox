@@ -52,10 +52,18 @@ match.
 
 The graded loop is the proof the rest do real work: a Climb that ports a BPE tokenizer
 to Rust, scored by an exact token-ID diff against tiktoken gpt2 (no gating, no hardcoded
-numbers). The workers write each edit with W&B Inference, the artifact is built and
-scored, and the improver reads the real eval failures back from Weave and rewrites the
-planner skill, so accuracy climbs across versions (tokenizer ~0.17 to 1.00, the textkit
-task 0.52 to 1.00) with zero swarm code changed between tasks.
+numbers). The workers author each edit with W&B Inference and the artifact is built and
+scored, with a deterministic renderer as the safety net on the curated tasks (a kept
+edit has to beat the oracle either way, so the score is always real). The improver reads
+the eval breakdown (from Weave when `GLASSBOX_IMPROVER_READ_WEAVE=1`, from the in-process
+result otherwise) and rewrites the planner skill to cover the biggest failing group, so
+the next version replans and the curve climbs: tokenizer 0.17 to 1.00, textkit 0.52 to
+1.00, with zero swarm code changed between tasks. One honest note: on these two curated
+tasks the climb is a deterministic curriculum (the same categories, added in roughly the
+same order, reach 1.00 every run), so it demonstrates the harness, not emergent
+discovery. The genuinely model-earned, no-safety-net path is bring-your-own-repo (below).
+The per-version curves are checked in under `docs/runs/` and regenerate with
+`uv run python scripts/capture_climb.py`.
 
 ## The swarm
 
@@ -103,6 +111,17 @@ swarm.
 | Sweep | Drain a finite backlog, wave by wave. | When the backlog is empty. |
 | Dig | Discover until the finds run dry. | After two rounds with nothing new. |
 | Race | Same goal, competing attempts, one judge. | When the judge picks a winner. |
+
+Honest status: two of these have an autonomous, tested stop detector wired end to end,
+Sweep (stops when the backlog drains to empty and stays empty) and Climb (stops when the
+metric plateaus), both in `apps/web/src/lib/fleet/loop-monitor.ts` and covered by
+`loop-monitor.test.ts`. The other six are selectable and redraw the board, and they stop
+on the agent's self-reported `LOOP_DONE` sentinel, a round budget, or a manual stop,
+rather than a coded detector for their named condition. Land maps cleanly to the sentinel
+(the agent verifies done), Hold and Watch are never-stop by design, and Burst, Dig, and
+Race carry their motion in the kickoff prompt and the board but not yet in an autonomous
+stop. So "pick a shape" always changes the framing and the board; for Sweep and Climb it
+also changes when the swarm stops on its own.
 
 ## Generality
 
