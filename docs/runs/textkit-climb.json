@@ -1,0 +1,228 @@
+{
+  "task": "textkit",
+  "goal": "Implement the textkit string library (slugify, wrap_words, comma, render) so its pytest suite passes. One bead per module; build the foundational module first, then cover the module whose tests fail most.",
+  "generated_at": "2026-06-30T05:46:20",
+  "git_commit": "8c38221",
+  "how": "uv run python scripts/capture_climb.py with GLASSBOX_WORKER_LLM=0 (deterministic curriculum). Each version's accuracy is the real oracle (tiktoken gpt2 exact token-id diff) or pytest score of the rebuilt artifact.",
+  "caveat_wall_ms": "wall_ms is a single cold subprocess invocation (macOS first-exec code-sign cost dominates, ~270ms); it is NOT steady-state tokenize latency. See docs/runs/tokenizer-perf.md.",
+  "versions": [
+    {
+      "version": 1,
+      "run_id": "evidence-textkit-v1",
+      "accuracy": 0.5238095238095238,
+      "covered": [
+        "slug"
+      ],
+      "failed_categories": [
+        "wrap",
+        "numbers",
+        "template"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    },
+    {
+      "version": 2,
+      "run_id": "evidence-textkit-v2",
+      "accuracy": 0.7142857142857143,
+      "covered": [
+        "slug",
+        "wrap"
+      ],
+      "failed_categories": [
+        "numbers",
+        "template"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    },
+    {
+      "version": 3,
+      "run_id": "evidence-textkit-v3",
+      "accuracy": 0.8571428571428571,
+      "covered": [
+        "slug",
+        "wrap",
+        "numbers"
+      ],
+      "failed_categories": [
+        "template"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    },
+    {
+      "version": 4,
+      "run_id": "evidence-textkit-v4",
+      "accuracy": 1.0,
+      "covered": [
+        "slug",
+        "wrap",
+        "numbers",
+        "template"
+      ],
+      "failed_categories": [],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    }
+  ],
+  "leaderboard": [
+    {
+      "version": 1,
+      "accuracy": 0.5238095238095238
+    },
+    {
+      "version": 2,
+      "accuracy": 0.7142857142857143
+    },
+    {
+      "version": 3,
+      "accuracy": 0.8571428571428571
+    },
+    {
+      "version": 4,
+      "accuracy": 1.0
+    }
+  ],
+  "per_version_meta": {
+    "1": {
+      "accuracy": 0.5238095238095238,
+      "wall_ms": 211,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f1890-5f83-75d2-9bfe-820dca0e7ccf",
+      "status": "failed",
+      "covered": [
+        "slug"
+      ],
+      "by_group": {
+        "numbers": {
+          "total": 5,
+          "passed": 2,
+          "failed": 3
+        },
+        "slug": {
+          "total": 6,
+          "passed": 6,
+          "failed": 0
+        },
+        "template": {
+          "total": 5,
+          "passed": 2,
+          "failed": 3
+        },
+        "wrap": {
+          "total": 5,
+          "passed": 1,
+          "failed": 4
+        }
+      },
+      "version": 1
+    },
+    "2": {
+      "added_category": "wrap",
+      "gap_source": "in_process",
+      "prev_accuracy": 0.5238095238095238,
+      "version": 2,
+      "accuracy": 0.7142857142857143,
+      "wall_ms": 163,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f1890-9653-7db5-b943-2eb23b2a1638",
+      "status": "failed",
+      "covered": [
+        "slug",
+        "wrap"
+      ],
+      "by_group": {
+        "numbers": {
+          "total": 5,
+          "passed": 2,
+          "failed": 3
+        },
+        "slug": {
+          "total": 6,
+          "passed": 6,
+          "failed": 0
+        },
+        "template": {
+          "total": 5,
+          "passed": 2,
+          "failed": 3
+        },
+        "wrap": {
+          "total": 5,
+          "passed": 5,
+          "failed": 0
+        }
+      }
+    },
+    "3": {
+      "added_category": "numbers",
+      "gap_source": "in_process",
+      "prev_accuracy": 0.7142857142857143,
+      "version": 3,
+      "accuracy": 0.8571428571428571,
+      "wall_ms": 160,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f1890-bf5a-7c9e-aa58-a8526c8ef07b",
+      "status": "failed",
+      "covered": [
+        "numbers",
+        "slug",
+        "wrap"
+      ],
+      "by_group": {
+        "numbers": {
+          "total": 5,
+          "passed": 5,
+          "failed": 0
+        },
+        "slug": {
+          "total": 6,
+          "passed": 6,
+          "failed": 0
+        },
+        "template": {
+          "total": 5,
+          "passed": 2,
+          "failed": 3
+        },
+        "wrap": {
+          "total": 5,
+          "passed": 5,
+          "failed": 0
+        }
+      }
+    },
+    "4": {
+      "added_category": "template",
+      "gap_source": "in_process",
+      "prev_accuracy": 0.8571428571428571,
+      "version": 4,
+      "accuracy": 1.0,
+      "wall_ms": 162,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f1890-f2db-707a-8b5c-edfd5cda7044",
+      "status": "passed",
+      "covered": [
+        "numbers",
+        "slug",
+        "template",
+        "wrap"
+      ],
+      "by_group": {
+        "numbers": {
+          "total": 5,
+          "passed": 5,
+          "failed": 0
+        },
+        "slug": {
+          "total": 6,
+          "passed": 6,
+          "failed": 0
+        },
+        "template": {
+          "total": 5,
+          "passed": 5,
+          "failed": 0
+        },
+        "wrap": {
+          "total": 5,
+          "passed": 5,
+          "failed": 0
+        }
+      }
+    }
+  }
+}

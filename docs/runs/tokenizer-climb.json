@@ -1,0 +1,518 @@
+{
+  "task": "tokenizer",
+  "goal": "Implement the gpt2 BPE pretokenizer in Rust (tokenizer-rs/src/pretok.rs) so the tokenizer reproduces tiktoken gpt2 token ids exactly across the fixture corpus (ascii, punctuation, numbers, code, unicode, whitespace, emoji).",
+  "generated_at": "2026-06-30T05:45:28",
+  "git_commit": "8c38221",
+  "how": "uv run python scripts/capture_climb.py with GLASSBOX_WORKER_LLM=0 (deterministic curriculum). Each version's accuracy is the real oracle (tiktoken gpt2 exact token-id diff) or pytest score of the rebuilt artifact.",
+  "caveat_wall_ms": "wall_ms is a single cold subprocess invocation (macOS first-exec code-sign cost dominates, ~270ms); it is NOT steady-state tokenize latency. See docs/runs/tokenizer-perf.md.",
+  "versions": [
+    {
+      "version": 1,
+      "run_id": "evidence-tokenizer-v1",
+      "accuracy": 0.17050691244239632,
+      "covered": [
+        "ascii"
+      ],
+      "failed_categories": [
+        "punctuation",
+        "numbers",
+        "unicode",
+        "whitespace",
+        "emoji",
+        "code"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    },
+    {
+      "version": 2,
+      "run_id": "evidence-tokenizer-v2",
+      "accuracy": 0.5714285714285714,
+      "covered": [
+        "ascii",
+        "punctuation"
+      ],
+      "failed_categories": [
+        "numbers",
+        "unicode",
+        "whitespace"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    },
+    {
+      "version": 3,
+      "run_id": "evidence-tokenizer-v3",
+      "accuracy": 0.7142857142857143,
+      "covered": [
+        "ascii",
+        "punctuation",
+        "numbers"
+      ],
+      "failed_categories": [
+        "unicode",
+        "whitespace"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    },
+    {
+      "version": 4,
+      "run_id": "evidence-tokenizer-v4",
+      "accuracy": 0.8571428571428571,
+      "covered": [
+        "ascii",
+        "punctuation",
+        "numbers",
+        "unicode"
+      ],
+      "failed_categories": [
+        "whitespace"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    },
+    {
+      "version": 5,
+      "run_id": "evidence-tokenizer-v5",
+      "accuracy": 1.0,
+      "covered": [
+        "ascii",
+        "punctuation",
+        "numbers",
+        "unicode",
+        "whitespace"
+      ],
+      "failed_categories": [
+        "ascii",
+        "code",
+        "emoji"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    },
+    {
+      "version": 6,
+      "run_id": "evidence-tokenizer-v6",
+      "accuracy": 1.0,
+      "covered": [
+        "ascii",
+        "punctuation",
+        "numbers",
+        "code",
+        "unicode",
+        "whitespace"
+      ],
+      "failed_categories": [
+        "ascii",
+        "emoji"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    },
+    {
+      "version": 7,
+      "run_id": "evidence-tokenizer-v7",
+      "accuracy": 1.0,
+      "covered": [
+        "ascii",
+        "punctuation",
+        "numbers",
+        "code",
+        "unicode",
+        "whitespace",
+        "emoji"
+      ],
+      "failed_categories": [
+        "ascii"
+      ],
+      "weave_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/weave"
+    }
+  ],
+  "leaderboard": [
+    {
+      "version": 1,
+      "accuracy": 0.17050691244239632
+    },
+    {
+      "version": 2,
+      "accuracy": 0.5714285714285714
+    },
+    {
+      "version": 3,
+      "accuracy": 0.7142857142857143
+    },
+    {
+      "version": 4,
+      "accuracy": 0.8571428571428571
+    },
+    {
+      "version": 5,
+      "accuracy": 1.0
+    },
+    {
+      "version": 6,
+      "accuracy": 1.0
+    },
+    {
+      "version": 7,
+      "accuracy": 1.0
+    }
+  ],
+  "per_version_meta": {
+    "1": {
+      "accuracy": 0.17050691244239632,
+      "wall_ms": 306,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f188f-5cca-7308-b734-19e1ac2d4199",
+      "status": "failed",
+      "covered": [],
+      "by_group": {
+        "ascii": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "punctuation": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        },
+        "numbers": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        },
+        "code": {
+          "total": 31,
+          "passed": 6,
+          "failed": 25
+        },
+        "unicode": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        },
+        "emoji": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        },
+        "whitespace": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        }
+      },
+      "version": 1
+    },
+    "2": {
+      "added_category": "punctuation",
+      "gap_source": "in_process",
+      "prev_accuracy": 0.17050691244239632,
+      "version": 2,
+      "accuracy": 0.5714285714285714,
+      "wall_ms": 227,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f188f-7743-7ec9-a0fb-bea5aeb5b292",
+      "status": "failed",
+      "covered": [
+        "punctuation"
+      ],
+      "by_group": {
+        "ascii": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "punctuation": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "numbers": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        },
+        "code": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "unicode": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        },
+        "emoji": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "whitespace": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        }
+      }
+    },
+    "3": {
+      "added_category": "numbers",
+      "gap_source": "in_process",
+      "prev_accuracy": 0.5714285714285714,
+      "version": 3,
+      "accuracy": 0.7142857142857143,
+      "wall_ms": 229,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f188f-916c-7a38-a0a1-9fbf928647d0",
+      "status": "failed",
+      "covered": [
+        "numbers",
+        "punctuation"
+      ],
+      "by_group": {
+        "ascii": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "punctuation": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "numbers": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "code": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "unicode": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        },
+        "emoji": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "whitespace": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        }
+      }
+    },
+    "4": {
+      "added_category": "unicode",
+      "gap_source": "in_process",
+      "prev_accuracy": 0.7142857142857143,
+      "version": 4,
+      "accuracy": 0.8571428571428571,
+      "wall_ms": 225,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f188f-b070-7423-a891-9a0b6e70af8c",
+      "status": "failed",
+      "covered": [
+        "numbers",
+        "punctuation",
+        "unicode"
+      ],
+      "by_group": {
+        "ascii": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "punctuation": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "numbers": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "code": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "unicode": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "emoji": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "whitespace": {
+          "total": 31,
+          "passed": 0,
+          "failed": 31
+        }
+      }
+    },
+    "5": {
+      "added_category": "whitespace",
+      "gap_source": "in_process",
+      "prev_accuracy": 0.8571428571428571,
+      "version": 5,
+      "accuracy": 1.0,
+      "wall_ms": 220,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f188f-d3e2-703c-9519-d2d099b18e27",
+      "status": "passed",
+      "covered": [
+        "numbers",
+        "punctuation",
+        "unicode",
+        "whitespace"
+      ],
+      "by_group": {
+        "ascii": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "punctuation": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "numbers": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "code": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "unicode": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "emoji": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "whitespace": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        }
+      }
+    },
+    "6": {
+      "added_category": "code",
+      "gap_source": "in_process",
+      "prev_accuracy": 1.0,
+      "version": 6,
+      "accuracy": 1.0,
+      "wall_ms": 221,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f188f-fae2-7849-845a-544b654ec633",
+      "status": "passed",
+      "covered": [
+        "code",
+        "numbers",
+        "punctuation",
+        "unicode",
+        "whitespace"
+      ],
+      "by_group": {
+        "ascii": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "punctuation": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "numbers": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "code": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "unicode": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "emoji": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "whitespace": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        }
+      }
+    },
+    "7": {
+      "added_category": "emoji",
+      "gap_source": "in_process",
+      "prev_accuracy": 1.0,
+      "version": 7,
+      "accuracy": 1.0,
+      "wall_ms": 161,
+      "weave_eval_url": "https://wandb.ai/whitely-white-elk-llc/glassbox/r/call/019f1890-24cf-7279-82f8-9c1cff5d4b89",
+      "status": "passed",
+      "covered": [
+        "code",
+        "emoji",
+        "numbers",
+        "punctuation",
+        "unicode",
+        "whitespace"
+      ],
+      "by_group": {
+        "ascii": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "punctuation": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "numbers": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "code": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "unicode": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "emoji": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        },
+        "whitespace": {
+          "total": 31,
+          "passed": 31,
+          "failed": 0
+        }
+      }
+    }
+  }
+}
