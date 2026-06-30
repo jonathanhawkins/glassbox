@@ -5,6 +5,11 @@ and the result graded for real.**
 
 ![swarm command center](docs/command-center.png)
 
+A one minute tour: the swarm decomposes a goal, grades itself against the tokenizer
+oracle, and climbs across versions.
+
+https://github.com/user-attachments/assets/493f770a-0023-483f-ab46-de2f65f77768
+
 Most AI is a "black box". You ask it something, an answer pops out, and you cannot
 see what happened in between. Glassbox is the opposite. It is a glass box: a team
 of AI helpers builds real software while you watch every step on a live board, a
