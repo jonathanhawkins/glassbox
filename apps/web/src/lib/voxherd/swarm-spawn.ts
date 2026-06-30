@@ -10,7 +10,7 @@
 
 import { spawnSession } from "./ws";
 import { fetchSessions, renameSession, sendCommand, submitSession } from "./client";
-import { roleKeyOf, type SwarmModels } from "./role-models";
+import { assistantOf, roleKeyOf, type SwarmModels } from "./role-models";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -133,8 +133,18 @@ async function spawnAndFind(
   dir: string | undefined,
   known: Set<string>,
   env: Record<string, string> | undefined,
+  // Launch-time brain config for assistants that can't be reconfigured in-session (Codex). Claude
+  // roles pass nothing here and are tuned via /model + /effort send-keys after spawn.
+  launch?: { assistant: string; model: string; effort: string },
 ): Promise<string | null> {
-  const r = await spawnSession({ project, dir, env });
+  const r = await spawnSession({
+    project,
+    dir,
+    env,
+    assistant: launch?.assistant,
+    model: launch?.model,
+    reasoning_effort: launch?.effort,
+  });
   if (!r.ok) return null;
   for (let i = 0; i < 25; i += 1) {
     await sleep(1000);
@@ -184,26 +194,34 @@ export async function spawnSwarm(opts: {
   const map: Record<string, string> = {};
 
   const place = async (node: string, prompt: string) => {
+    // Resolve the brain BEFORE spawning: a Codex role launches already on its model + reasoning
+    // effort (its TUI /model is an interactive picker send-keys can't drive), whereas a Claude role
+    // spawns vanilla and is tuned in-session via /model + /effort below.
+    const role = roleKeyOf(node);
+    const cfg = role ? models?.[role] : undefined;
+    const assistant = cfg ? assistantOf(cfg.model) : "claude";
+    const launch =
+      assistant === "codex" && cfg ? { assistant, model: cfg.model, effort: cfg.effort } : undefined;
     onProgress?.(`spawning ${node}…`);
-    const sid = await spawnAndFind(project, dir, known, env);
+    const sid = await spawnAndFind(project, dir, known, env, launch);
     if (!sid) return;
     map[node] = sid;
     // Name it at the voxherd level (no-op on older bridge builds) and tell the caller NOW so the
     // node lights up + streams its real terminal as soon as it is alive.
     void renameSession(sid, node);
     onNode?.(node, sid);
-    // Configure the brain FIRST: /model + /effort go down the same send-keys path as every
-    // other command, into the still-idle session, so the role prompt below runs on the chosen
-    // model instead of the default. Short settles keep the typed lines from interleaving.
-    const role = roleKeyOf(node);
-    const cfg = role ? models?.[role] : undefined;
     await sleep(800);
-    if (cfg) {
+    if (cfg && assistant === "claude") {
+      // Claude only: /model + /effort go down the same send-keys path as every other command, into
+      // the still-idle session, so the role prompt below runs on the chosen brain instead of the
+      // default. Short settles keep the typed lines from interleaving.
       onProgress?.(`${node}: /model ${cfg.model} · /effort ${cfg.effort}`);
       await sendCommand({ project, session_id: sid, message: `/model ${cfg.model}` });
       await sleep(600);
       await sendCommand({ project, session_id: sid, message: `/effort ${cfg.effort}` });
       await sleep(600);
+    } else if (cfg) {
+      onProgress?.(`${node}: codex ${cfg.model} · effort ${cfg.effort} (at launch)`);
     }
     await sendCommand({ project, session_id: sid, message: prompt });
     // The role prompt is multi-line, so it lands as a HELD bracketed paste. Fire a separate

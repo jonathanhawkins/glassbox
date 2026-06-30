@@ -11,13 +11,24 @@ import { useEffect, useRef, useState } from "react";
 import { agentColor } from "@/lib/cockpit/types";
 import {
   DEFAULT_SWARM_MODELS,
-  EFFORT_CHOICES,
   MODEL_CHOICES,
   ROLE_ROWS,
+  assistantOf,
+  coerceEffort,
+  effortsFor,
   modelLabel,
+  type Assistant,
   type RoleKey,
   type SwarmModels,
 } from "@/lib/voxherd/role-models";
+
+// Model options grouped by brain so the operator sees, and the <optgroup> labels make clear,
+// which rows run on Claude vs Codex. The effort dropdown then offers only the chosen brain's
+// valid levels (Claude low..max, Codex minimal..xhigh).
+const MODEL_GROUPS: { label: string; assistant: Assistant }[] = [
+  { label: "Claude", assistant: "claude" },
+  { label: "Codex", assistant: "codex" },
+];
 
 const SELECT_CLS =
   "rounded-md border border-line bg-canvas/70 px-1.5 py-1 text-[11px] text-ink outline-none transition-colors focus:border-accent/60";
@@ -44,8 +55,12 @@ export function ModelsMenu({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  const set = (key: RoleKey, field: "model" | "effort", v: string) =>
-    onChange({ ...value, [key]: { ...value[key], [field]: v } });
+  // Changing the model can switch brains, so re-clamp the effort to the new brain's valid set
+  // (e.g. Claude "max" -> Codex "xhigh"); changing the effort just stores the (already valid) level.
+  const setModel = (key: RoleKey, model: string) =>
+    onChange({ ...value, [key]: { model, effort: coerceEffort(assistantOf(model), value[key].effort) } });
+  const setEffort = (key: RoleKey, effort: string) =>
+    onChange({ ...value, [key]: { ...value[key], effort } });
 
   const customized = JSON.stringify(value) !== JSON.stringify(DEFAULT_SWARM_MODELS);
 
@@ -98,23 +113,27 @@ export function ModelsMenu({
                 </span>
                 <select
                   value={value[row.key].model}
-                  onChange={(e) => set(row.key, "model", e.target.value)}
+                  onChange={(e) => setModel(row.key, e.target.value)}
                   className={SELECT_CLS}
                   title={`${row.label} model`}
                 >
-                  {MODEL_CHOICES.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
+                  {MODEL_GROUPS.map((g) => (
+                    <optgroup key={g.assistant} label={g.label}>
+                      {MODEL_CHOICES.filter((m) => m.assistant === g.assistant).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 <select
                   value={value[row.key].effort}
-                  onChange={(e) => set(row.key, "effort", e.target.value)}
+                  onChange={(e) => setEffort(row.key, e.target.value)}
                   className={SELECT_CLS}
                   title={`${row.label} effort`}
                 >
-                  {EFFORT_CHOICES.map((lvl) => (
+                  {effortsFor(assistantOf(value[row.key].model)).map((lvl) => (
                     <option key={lvl} value={lvl}>
                       {lvl}
                     </option>
@@ -125,7 +144,8 @@ export function ModelsMenu({
           </div>
           <p className="mt-2 text-[10px] leading-relaxed text-ink-dim">
             Applied when <span className="text-accent">+ real swarm</span> spawns the sessions:
-            each gets /model and /effort before its role prompt. Saved for next time.
+            Claude roles get /model and /effort before the role prompt; Codex roles launch on
+            their model and reasoning effort. Saved for next time.
           </p>
         </div>
       )}

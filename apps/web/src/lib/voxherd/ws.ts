@@ -67,7 +67,17 @@ export function stripAnsi(s: string): string {
 export async function spawnSession(opts: {
   project: string;
   dir?: string;
+  // Which CLI to launch ("claude" | "codex" | "gemini"); the bridge defaults to claude when absent.
   assistant?: string;
+  // Launch-time brain config, used for assistants whose model/effort CANNOT be set in-session via
+  // send-keys. Codex is the case in point: its TUI "/model" is an interactive picker (no inline
+  // args), so a Codex role must launch already on its model + reasoning effort — the bridge maps
+  // these to `codex -m <model> -c model_reasoning_effort=<reasoning_effort>`. Claude roles leave
+  // these unset and are reconfigured in-session via /model + /effort instead. Forward-compatible
+  // like `env` below: pydantic on the bridge drops fields it doesn't yet read, so passing them is
+  // harmless on an older bridge and activates the moment the bridge honors them.
+  model?: string;
+  reasoning_effort?: string;
   prompt?: string;
   // Extra environment for the spawned session, intended to share ONE task list across a swarm
   // (CLAUDE_CODE_TASK_LIST_ID = the conductor's session id) so the plan and the workers'
@@ -102,6 +112,8 @@ export async function spawnSession(opts: {
       const msg: Record<string, unknown> = { type: "spawn_session", project: opts.project };
       if (opts.dir) msg.dir = opts.dir;
       if (opts.assistant) msg.assistant = opts.assistant;
+      if (opts.model) msg.model = opts.model;
+      if (opts.reasoning_effort) msg.reasoning_effort = opts.reasoning_effort;
       if (opts.prompt) msg.prompt = opts.prompt;
       if (opts.env) msg.env = opts.env;
       void signed(token, msg).then((m) => {

@@ -5,6 +5,11 @@ import {
   reviveSwarmModels,
   roleKeyOf,
   modelLabel,
+  assistantOf,
+  effortsFor,
+  coerceEffort,
+  CLAUDE_EFFORTS,
+  CODEX_EFFORTS,
   DEFAULT_SWARM_MODELS,
   type SwarmModels,
 } from "./role-models.ts";
@@ -107,5 +112,58 @@ test("roleKeyOf returns null for an unknown node", () => {
 test("modelLabel resolves known ids and passes unknown ids through unchanged", () => {
   assert.equal(modelLabel("opus"), "Opus 4.8");
   assert.equal(modelLabel("fable"), "Fable 5");
+  assert.equal(modelLabel("gpt-5.5"), "GPT-5.5");
   assert.equal(modelLabel("some-future-model"), "some-future-model");
+});
+
+// assistantOf routes a model id to its CLI; effort sets differ per brain.
+
+test("assistantOf maps Claude ids to claude and Codex ids to codex", () => {
+  assert.equal(assistantOf("opus"), "claude");
+  assert.equal(assistantOf("fable"), "claude");
+  assert.equal(assistantOf("gpt-5.5"), "codex");
+  assert.equal(assistantOf("gpt-5.4-mini"), "codex");
+});
+
+test("assistantOf defaults an unknown id to claude (the historical brain)", () => {
+  assert.equal(assistantOf("some-future-model"), "claude");
+  assert.equal(assistantOf(""), "claude");
+});
+
+test("effortsFor returns the brain-specific levels: Claude has max, Codex has minimal", () => {
+  assert.deepEqual(effortsFor("claude"), CLAUDE_EFFORTS);
+  assert.deepEqual(effortsFor("codex"), CODEX_EFFORTS);
+  assert.ok(CLAUDE_EFFORTS.includes("max") && !CODEX_EFFORTS.includes("max" as never));
+  assert.ok(CODEX_EFFORTS.includes("minimal") && !CLAUDE_EFFORTS.includes("minimal" as never));
+});
+
+// coerceEffort keeps an effort valid for its brain, mapping across brains by intent.
+
+test("coerceEffort passes through an already-valid level for the brain", () => {
+  assert.equal(coerceEffort("claude", "max"), "max");
+  assert.equal(coerceEffort("claude", "medium"), "medium");
+  assert.equal(coerceEffort("codex", "xhigh"), "xhigh");
+  assert.equal(coerceEffort("codex", "minimal"), "minimal");
+});
+
+test("coerceEffort maps cross-brain extremes: Claude max <-> Codex xhigh, Codex minimal -> Claude low", () => {
+  assert.equal(coerceEffort("codex", "max"), "xhigh"); // Claude top -> Codex top
+  assert.equal(coerceEffort("claude", "minimal"), "low"); // Codex floor -> Claude floor
+});
+
+test("coerceEffort falls back to a safe 'high' for an unrecognized level", () => {
+  assert.equal(coerceEffort("claude", "bogus"), "high");
+  assert.equal(coerceEffort("codex", "bogus"), "high");
+});
+
+// reviveSwarmModels clamps a persisted effort to the model's brain.
+
+test("reviveSwarmModels clamps a Codex model carrying Claude's 'max' down to 'xhigh'", () => {
+  const out = reviveSwarmModels({ worker: { model: "gpt-5.5", effort: "max" } });
+  assert.deepEqual(out.worker, { model: "gpt-5.5", effort: "xhigh" });
+});
+
+test("reviveSwarmModels keeps a valid Codex effort untouched", () => {
+  const out = reviveSwarmModels({ planner: { model: "gpt-5.4-mini", effort: "high" } });
+  assert.deepEqual(out.planner, { model: "gpt-5.4-mini", effort: "high" });
 });
