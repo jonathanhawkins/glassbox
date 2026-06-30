@@ -31,8 +31,8 @@ same thing said precisely.
 
 ## The technical version
 
-A glass cockpit for swarms of real coding agents. Point it at live Claude Code,
-Codex, and Gemini sessions, choose one of 8 loop shapes, and watch the swarm
+A glass cockpit for swarms of real coding agents. Point it at live Claude Code
+sessions, choose one of 8 loop shapes, and watch the swarm
 decompose the goal, hand each piece to a sub-agent, and verify the work for real,
 every move animated on a tldraw board.
 
@@ -149,7 +149,7 @@ Per-task planner-version scores -> Redis sorted sets -> the climbing curve
 
 | Layer | Tech |
 | --- | --- |
-| Live sessions | voxherd-bridge over tmux (Claude Code, Codex, Gemini) |
+| Live sessions | voxherd-bridge over tmux (Claude Code) |
 | Coordination | Agent Mail (MCP), Beads (`br`) |
 | Observability + eval + self-improvement | W&B Weave + W&B MCP server |
 | Event bus + per-task leaderboard | Redis (Streams + sorted sets) |
@@ -180,8 +180,8 @@ Per-task planner-version scores -> Redis sorted sets -> the climbing curve
 
 ## Prerequisites
 
-The cockpit's swarm command center (the default view) drives real Claude Code, Codex,
-and Gemini sessions, and it reaches them through **voxherd-bridge**, a local daemon that
+The cockpit's swarm command center (the default view) drives real Claude Code
+sessions, and it reaches them through **voxherd-bridge**, a local daemon that
 runs each session inside **tmux**. Both are required for the live fleet and session views
 (the graded tokenizer and textkit runs work without them).
 
