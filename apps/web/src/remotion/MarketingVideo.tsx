@@ -268,11 +268,11 @@ function Roles() {
 
 // --- scene 3: models + effort ---------------------------------------------------------
 const MODEL_ROWS = [
-  { role: "planner", model: "Fable 5", effort: "xhigh" },
+  { role: "planner", model: "Opus 4.8", effort: "xhigh" },
   { role: "coordinator", model: "Opus 4.8", effort: "max" },
   { role: "workers", model: "Opus 4.8", effort: "max" },
   { role: "validator", model: "Opus 4.8", effort: "xhigh" },
-  { role: "improver", model: "Fable 5", effort: "xhigh" },
+  { role: "improver", model: "Opus 4.8", effort: "xhigh" },
 ];
 
 function Pill({ text, accent }: { text: string; accent?: boolean }) {
@@ -450,12 +450,15 @@ function Loops() {
           </div>
           <div style={featurePanel}>
             <div style={featureTitle}>
-              <span style={{ color: T.accent }}>Climb</span> · a real metric
+              <span style={{ color: T.accent }}>Climb</span> · cold eval wall
             </div>
             <div style={{ fontFamily: MONO, fontSize: 58, color: T.ink, marginTop: 26 }}>
               269 → <span style={{ color: T.accentBright }}>{ms} ms</span>
             </div>
-            <div style={{ marginTop: 30, minHeight: 56 }}>
+            <div style={{ fontFamily: MONO, fontSize: 22, color: T.inkMid, marginTop: 10 }}>
+              warm tokenize ~4 ms · accuracy 1.000
+            </div>
+            <div style={{ marginTop: 22, minHeight: 56 }}>
               {frame >= 418 && <EndChip text="plateau: best kept" at={418} />}
             </div>
           </div>
